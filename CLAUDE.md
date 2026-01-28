@@ -46,6 +46,55 @@ Use speckit commands in order:
 - Shared mutable state (use channels)
 - Any dependencies outside std library
 
+## Quality Assurance
+
+### Mandatory Checks Before Committing
+
+**CRITICAL**: Every code change MUST pass these checks:
+
+1. **Compilation Check**
+   ```bash
+   ~/.navi/navi compile
+   ```
+   - MUST compile without errors
+   - Fix all syntax errors immediately
+   - Verify all imports are correct
+
+2. **Test Execution**
+   ```bash
+   ~/.navi/navi test
+   ```
+   - ALL tests MUST pass
+   - No skipped or failing tests allowed
+   - Add tests for new features
+
+### Navi Language Resources
+
+When encountering Navi syntax issues, consult these resources **IN ORDER**:
+
+1. **Navi Skill** (Local)
+   - Location: `.claude/skills/navi/SKILL.md`
+   - References: `.claude/skills/navi/references/*.md`
+   - Quick reference for syntax, patterns, and idioms
+
+2. **Navi GitHub Repository**
+   - Syntax References: https://github.com/navi-language/navi/tree/main/.claude/skills/navi/references
+   - Example Code: https://github.com/navi-language/navi/tree/main/.claude/skills/navi/examples
+   - Official test suite examples
+
+3. **Standard Library Documentation**
+   - Documentation: https://navi-lang.org/stdlib/
+   - API reference for std library modules
+   - Usage examples for built-in functions
+
+### Common Navi Syntax Issues
+
+- **Module imports**: Use `use module.Type;` not `use module::Type;`
+- **Error handling**: `try?` returns `nil` on error (for functions that throw)
+- **Validation**: Functions that throw have no return value when using `try?`
+- **Testing**: Use `test "name" { }` blocks inline or in separate test files
+- **Module structure**: Files at project root become modules automatically
+
 ## File Structure
 
 ```

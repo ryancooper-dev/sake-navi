@@ -1,7 +1,7 @@
 /// HTTP Response builder
-/// 
+///
 /// Builds HTTP responses with status code, headers, and body.
-/// 
+///
 /// # Example
 /// ```nv
 /// let resp = Response.new();
@@ -11,7 +11,7 @@
 /// let http_response = resp.build();
 /// ```
 
-use std.io.{Writer};
+use std.io.Write;
 
 /// HTTP status code descriptions
 let STATUS_TEXTS: <int, string> = {
@@ -145,12 +145,12 @@ impl Response {
     }
     
     /// Send response to a writer
-    /// 
+    ///
     /// # Arguments
     /// * `writer` - Writer to send response to
-    pub fn send(self, writer: Writer) throws {
+    pub fn send(self, writer: Write) throws {
         let data = self.build();
-        try writer.write(data.as_bytes());
+        try writer.write_string(data);
         try writer.flush();
         self.headers_sent = true;
     }

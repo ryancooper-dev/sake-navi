@@ -3,7 +3,7 @@
 /// Handles CORS preflight requests and adds appropriate headers
 /// to allow cross-origin requests from browsers.
 
-use context.{Context, HandlerFunc};
+use sake.context.{Context, HandlerFunc};
 
 /// CORS middleware configuration
 pub struct CorsConfig {
@@ -158,7 +158,7 @@ fn is_origin_allowed(origin: string, allowed: [string]): bool {
 // Tests
 // ============================================
 
-use request.Request;
+use sake.request.Request;
 
 test "cors allows all origins by default" {
     let request = try! Request.parse("GET /test HTTP/1.1\r\nOrigin: https://example.com\r\n\r\n");

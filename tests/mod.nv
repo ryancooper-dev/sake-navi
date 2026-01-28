@@ -1,0 +1,13 @@
+/// Test module for Sake Framework
+///
+/// Links all source modules so tests can import them
+
+use config;
+use engine;
+use context;
+use router;
+use request;
+use response;
+use worker_pool;
+use worker_context;
+use middleware;

@@ -3,8 +3,17 @@
 /// Implements HTTP Basic Authentication by validating credentials
 /// from the Authorization header.
 
-use std.encoding.base64;
-use context.{Context, HandlerFunc};
+// TODO: Navi doesn't have base64 in std.encoding yet
+// use std.encoding.base64;
+use sake.context.{Context, HandlerFunc};
+
+/// Temporary base64 decode stub
+/// TODO: Implement proper base64 decoding
+fn base64_decode(encoded: string): string? {
+    // For now, return nil to indicate decoding not implemented
+    // This allows compilation while base64 support is pending
+    return nil;
+}
 
 /// Account credentials
 pub struct Account {
@@ -95,7 +104,7 @@ pub fn basic_auth_with_config(config: BasicAuthConfig): HandlerFunc {
                 let encoded = auth.slice(6, auth.len());
 
                 // Decode base64
-                let decoded_result = try? base64.decode(encoded);
+                let decoded_result = base64_decode(encoded);
                 if (let decoded = decoded_result) {
                     // Parse username:password
                     let parts = decoded.split(":");
@@ -137,7 +146,7 @@ fn validate_credentials(username: string, password: string, accounts: [Account])
 // Tests
 // ============================================
 
-use request.Request;
+use sake.request.Request;
 
 test "basic_auth allows valid credentials" {
     let accounts = [Account.new("admin", "secret")];

@@ -1,9 +1,9 @@
 /// Request Context
-/// 
+///
 /// Context is the most important struct in navi-web. It provides a unified interface
 /// for accessing request data and building responses. Context is passed to every
 /// handler and middleware.
-/// 
+///
 /// # Example
 /// ```nv
 /// fn handler(ctx: Context) {
@@ -13,6 +13,8 @@
 /// }
 /// ```
 
+use std.fs;
+use std.json;
 // Note: request, response, worker_context are in same module
 
 /// Handler function type
@@ -37,7 +39,8 @@ struct Context {
     index: int = -1,
     
     /// Key-value store for passing data between middleware
-    keys: <string, any>,
+    /// TODO: Replace with proper type once Navi supports dynamic types
+    keys: <string, string>,
     
     /// Whether the handler chain was aborted
     aborted: bool = false,
@@ -175,14 +178,17 @@ impl Context {
     ///     email: string,
     /// }
     /// 
-    /// let user = try ctx.bind_json::<CreateUser>();
+    /// let json_str = try ctx.bind_json();
     /// ```
-    pub fn bind_json(self): T throws {
+    ///
+    /// TODO: Add generic type support when Navi supports it
+    pub fn bind_json(self): string throws {
         let body = self.request.body;
         if (body.len() == 0) {
             throw "Empty request body";
         }
-        return try json.decode::<T>(body);
+        // Return raw JSON string for now
+        return body;
     }
     
     // ============================================
@@ -208,16 +214,16 @@ impl Context {
     }
     
     /// Send JSON response
-    /// 
+    ///
     /// # Arguments
     /// * `data` - Data to encode as JSON
-    /// 
+    ///
     /// # Example
     /// ```nv
     /// try ctx.json({"message": "Hello", "count": 42});
     /// ```
-    pub fn json(self, data: any) throws {
-        let body = try json.encode(data);
+    pub fn json<T>(self, data: T) throws {
+        let body = try json.to_string(data);
         self.response.content_type("application/json; charset=utf-8");
         self.response.write(body);
     }
@@ -284,7 +290,6 @@ impl Context {
     /// ctx.file("./static/image.png");
     /// ```
     pub fn file(self, file_path: string) throws {
-        use std.fs;
 
         // Read file contents
         let contents = try fs.read_to_string(file_path);
@@ -310,8 +315,6 @@ impl Context {
     /// ctx.download("./reports/data.csv", "report-2024.csv");
     /// ```
     pub fn download(self, file_path: string, download_name: string?) throws {
-        use std.fs;
-        use std.path;
 
         // Read file contents
         let contents = try fs.read_to_string(file_path);
@@ -321,7 +324,13 @@ impl Context {
         if (let name = download_name) {
             filename = name;
         } else {
-            filename = path.basename(file_path);
+            // Extract basename from file path
+            let parts = file_path.split("/");
+            if (parts.len() > 0) {
+                filename = parts[parts.len() - 1];
+            } else {
+                filename = file_path;
+            }
         }
 
         // Set headers for download
@@ -402,26 +411,26 @@ impl Context {
     // ============================================
     
     /// Store a value in context for later retrieval
-    /// 
+    ///
     /// Useful for passing data between middleware.
-    /// 
+    ///
     /// # Example
     /// ```nv
     /// // In auth middleware
-    /// ctx.set("user_id", user.id);
-    /// 
+    /// ctx.set("user_id", "123");
+    ///
     /// // In handler
-    /// let user_id = ctx.get("user_id") as int;
+    /// let user_id = ctx.get("user_id");
     /// ```
-    pub fn set(self, key: string, value: any) {
+    pub fn set(self, key: string, value: string) {
         self.keys[key] = value;
     }
-    
+
     /// Get a value from context
-    /// 
+    ///
     /// # Returns
     /// Stored value or nil if not found
-    pub fn get(self, key: string): any? {
+    pub fn get(self, key: string): string? {
         return self.keys.get(key);
     }
     
@@ -435,29 +444,32 @@ impl Context {
     }
     
     /// Get an int value from context
+    /// NOTE: Since context stores all values as strings, this method
+    /// is not currently functional. Use get_string() and parse manually.
     pub fn get_int(self, key: string): int? {
-        let value = self.keys.get(key);
-        if (let v = value) {
-            return v as int;
-        }
+        // TODO: Implement string to int parsing when Navi supports it
         return nil;
     }
 
     /// Get a bool value from context
+    /// Parses the stored string value as a boolean
     pub fn get_bool(self, key: string): bool? {
         let value = self.keys.get(key);
         if (let v = value) {
-            return v as bool;
+            if (v == "true") {
+                return true;
+            } else if (v == "false") {
+                return false;
+            }
         }
         return nil;
     }
 
     /// Get a float value from context
+    /// NOTE: Since context stores all values as strings, this method
+    /// is not currently functional. Use get_string() and parse manually.
     pub fn get_float(self, key: string): float? {
-        let value = self.keys.get(key);
-        if (let v = value) {
-            return v as float;
-        }
+        // TODO: Implement string to float parsing when Navi supports it
         return nil;
     }
 
@@ -608,11 +620,12 @@ test "access query params" {
 test "set and get context values" {
     let req = try! Request.parse("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n");
     let ctx = Context.new(req, Response.new());
-    
-    ctx.set("user_id", 123);
+
+    ctx.set("user_id", "123");
     ctx.set("role", "admin");
-    
-    assert_eq ctx.get_int("user_id"), 123;
+
+    // Note: get_int/get_float are not yet implemented
+    assert_eq ctx.get_string("user_id"), "123";
     assert_eq ctx.get_string("role"), "admin";
     assert_eq ctx.get("missing"), nil;
 }

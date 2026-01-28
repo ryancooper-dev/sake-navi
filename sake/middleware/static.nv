@@ -4,7 +4,7 @@
 
 use std.fs;
 use std.path;
-use context.{Context, HandlerFunc};
+use sake.context.{Context, HandlerFunc};
 
 /// Static file middleware configuration
 pub struct StaticConfig {
@@ -220,7 +220,7 @@ fn serve_directory_listing(ctx: Context, dir_path: string, url_path: string) {
 // Tests
 // ============================================
 
-use request.Request;
+use sake.request.Request;
 
 test "static config with root" {
     let config = StaticConfig.with_root("./public");

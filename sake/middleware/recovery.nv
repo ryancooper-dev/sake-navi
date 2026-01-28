@@ -3,7 +3,7 @@
 /// Catches errors thrown during request handling and returns
 /// a 500 Internal Server Error response instead of crashing the server.
 
-use context.{Context, HandlerFunc};
+use sake.context.{Context, HandlerFunc};
 
 /// Recovery middleware configuration
 pub struct RecoveryConfig {
@@ -83,7 +83,7 @@ pub fn recovery_with_config(config: RecoveryConfig): HandlerFunc {
 // Tests
 // ============================================
 
-use request.Request;
+use sake.request.Request;
 
 test "recovery catches errors" {
     let request = try! Request.parse("GET /test HTTP/1.1\r\n\r\n");

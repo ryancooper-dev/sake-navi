@@ -55,15 +55,8 @@ impl WorkerContext {
     /// # Errors
     /// Throws if JSON encoding fails
     pub fn to_json(self): string throws {
-        let obj = {
-            "path": self.path,
-            "method": self.method,
-            "headers": self.headers,
-            "query": self.query,
-            "params": self.params,
-            "body": self.body,
-        };
-        return try json.encode(obj);
+        // Use json.to_string to serialize the WorkerContext struct
+        return try json.to_string(self);
     }
 
     /// Deserialize from JSON string
@@ -77,24 +70,8 @@ impl WorkerContext {
     /// # Errors
     /// Throws if JSON is invalid or missing required fields
     pub fn from_json(json_str: string): WorkerContext throws {
-        let obj = try json.decode::<any>(json_str);
-
-        // Extract fields from decoded object
-        let path = obj.path as string;
-        let method = obj.method as string;
-        let headers = obj.headers as <string, string>;
-        let query = obj.query as <string, string>;
-        let params = obj.params as <string, string>;
-        let body = obj.body as string;
-
-        return WorkerContext {
-            path,
-            method,
-            headers,
-            query,
-            params,
-            body,
-        };
+        // Use json.parse to deserialize directly to WorkerContext
+        return try json.parse::<WorkerContext>(json_str);
     }
 }
 
@@ -152,12 +129,8 @@ impl WorkerResponse {
     /// # Errors
     /// Throws if JSON encoding fails
     pub fn to_json(self): string throws {
-        let obj = {
-            "status": self.status,
-            "headers": self.headers,
-            "body": self.body,
-        };
-        return try json.encode(obj);
+        // Use json.to_string to serialize the WorkerResponse struct
+        return try json.to_string(self);
     }
 
     /// Deserialize from JSON string
@@ -171,17 +144,8 @@ impl WorkerResponse {
     /// # Errors
     /// Throws if JSON is invalid or missing required fields
     pub fn from_json(json_str: string): WorkerResponse throws {
-        let obj = try json.decode::<any>(json_str);
-
-        let status = obj.status as int;
-        let headers = obj.headers as <string, string>;
-        let body = obj.body as string;
-
-        return WorkerResponse {
-            status,
-            headers,
-            body,
-        };
+        // Use json.parse to deserialize directly to WorkerResponse
+        return try json.parse::<WorkerResponse>(json_str);
     }
 }
 

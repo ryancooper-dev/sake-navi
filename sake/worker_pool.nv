@@ -194,11 +194,22 @@ test "create worker pool" {
 }
 
 test "worker pool validates size" {
-    let result = try? WorkerPool.new(0);
-    assert result == nil;
+    // Test that invalid pool sizes throw errors
+    let threw1 = false;
+    if (let _ = try? WorkerPool.new(0)) {
+        // Should not succeed
+    } else {
+        threw1 = true;
+    }
+    assert threw1;
 
-    let result2 = try? WorkerPool.new(-1);
-    assert result2 == nil;
+    let threw2 = false;
+    if (let _ = try? WorkerPool.new(-1)) {
+        // Should not succeed
+    } else {
+        threw2 = true;
+    }
+    assert threw2;
 }
 
 test "submit task to worker pool" {

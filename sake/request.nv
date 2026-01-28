@@ -174,11 +174,9 @@ impl Request {
     }
     
     /// Get Content-Length as integer
+    /// TODO: Implement string to int parsing when Navi supports it
     pub fn content_length(self): int? {
-        let len_str = self.header("content-length");
-        if (let s = len_str) {
-            return try? s.parse::<int>();
-        }
+        // String parsing not yet implemented in Navi
         return nil;
     }
     

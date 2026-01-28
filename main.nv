@@ -1,0 +1,12 @@
+/// Sake Web Framework
+///
+/// A high-performance, Gin-inspired web framework for Navi
+/// with built-in concurrency support.
+
+// Link all modules so they can be imported by tests
+use sake;
+
+fn main() {
+    println("Sake Web Framework - Use as a library");
+    println("Run tests with: navi test");
+}
