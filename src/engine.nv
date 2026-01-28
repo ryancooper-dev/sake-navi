@@ -1,0 +1,203 @@
+/// Sake Web Framework Engine
+///
+/// Engine is the core of the Sake framework. It manages the HTTP server,
+/// routing, middleware, and request handling with support for both
+/// concurrent (spawn) and parallel (WorkerPool) execution.
+///
+/// # Example
+/// ```nv
+/// use sake.Engine;
+/// use sake.Config;
+///
+/// fn main() throws {
+///     let config = Config.default();
+///     let app = Engine.new(config);
+///
+///     app.get("/", |ctx| {
+///         ctx.string("Hello!");
+///     });
+///
+///     try app.run(":8080");
+/// }
+/// ```
+
+use config.Config;
+use router.Router;
+use context.{Context, HandlerFunc};
+use request.Request;
+use response.Response;
+
+/// Sake web framework engine
+pub struct Engine {
+    /// Router for route matching
+    router: Router,
+
+    /// Configuration
+    config: Config,
+
+    /// Global middleware applied to all routes
+    middleware: [HandlerFunc],
+
+    /// Shutdown channel
+    shutdown_ch: channel::<bool>?,
+}
+
+impl Engine {
+    /// Create a new Engine with given configuration
+    ///
+    /// # Arguments
+    /// * `config` - Framework configuration
+    ///
+    /// # Returns
+    /// New Engine instance
+    pub fn new(config: Config): Engine {
+        return Engine {
+            router: Router.new(),
+            config,
+            middleware: [],
+            shutdown_ch: nil,
+        };
+    }
+
+    /// Create a new Engine with default configuration
+    pub fn default(): Engine {
+        return Engine.new(Config.default());
+    }
+
+    /// Register a GET route
+    ///
+    /// # Arguments
+    /// * `path` - Route path (supports :param syntax)
+    /// * `handler` - Handler function
+    ///
+    /// # Example
+    /// ```nv
+    /// app.get("/users/:id", |ctx| {
+    ///     let id = ctx.param("id");
+    ///     ctx.json({"id": id});
+    /// });
+    /// ```
+    pub fn get(self, path: string, handler: HandlerFunc) {
+        self.router.add_route("GET", path, handler);
+    }
+
+    /// Register a POST route
+    pub fn post(self, path: string, handler: HandlerFunc) {
+        self.router.add_route("POST", path, handler);
+    }
+
+    /// Register a PUT route
+    pub fn put(self, path: string, handler: HandlerFunc) {
+        self.router.add_route("PUT", path, handler);
+    }
+
+    /// Register a DELETE route
+    pub fn delete(self, path: string, handler: HandlerFunc) {
+        self.router.add_route("DELETE", path, handler);
+    }
+
+    /// Register a PATCH route
+    pub fn patch(self, path: string, handler: HandlerFunc) {
+        self.router.add_route("PATCH", path, handler);
+    }
+
+    /// Add global middleware
+    ///
+    /// # Arguments
+    /// * `middleware` - Middleware handler function
+    ///
+    /// # Example
+    /// ```nv
+    /// app.use(|ctx| {
+    ///     println("Request received");
+    ///     try ctx.next();
+    /// });
+    /// ```
+    pub fn use(self, middleware: HandlerFunc) {
+        self.middleware.push(middleware);
+    }
+
+    /// Start the HTTP server
+    ///
+    /// # Arguments
+    /// * `addr` - Address to listen on (e.g., ":8080", "127.0.0.1:3000")
+    ///
+    /// # Errors
+    /// Throws if server fails to start or encounters error during operation
+    ///
+    /// # Example
+    /// ```nv
+    /// try app.run(":8080");
+    /// ```
+    pub fn run(self, addr: string) throws {
+        // Validate configuration
+        try self.config.validate();
+
+        // TODO: Initialize WorkerPool if enabled
+        // TODO: Start TCP listener
+        // TODO: Accept connections in loop
+        // TODO: Spawn handler for each connection
+
+        throw "Engine.run() not yet implemented";
+    }
+
+    /// Shutdown the server gracefully
+    ///
+    /// Signals the server to stop accepting new connections
+    /// and wait for existing requests to complete.
+    pub fn shutdown(self) throws {
+        if (let ch = self.shutdown_ch) {
+            try ch.send(true);
+        }
+    }
+}
+
+// ============================================
+// Tests
+// ============================================
+
+test "create engine with default config" {
+    let app = Engine.default();
+    assert_eq app.config.worker_pool_size, 0;
+    assert_eq app.config.enable_worker_pool, true;
+}
+
+test "create engine with custom config" {
+    let config = Config.default().with_worker_pool_size(4);
+    let app = Engine.new(config);
+    assert_eq app.config.worker_pool_size, 4;
+}
+
+test "register GET route" {
+    let app = Engine.default();
+    app.get("/test", |ctx| {
+        ctx.string("test");
+    });
+
+    // Router should have the route registered
+    assert_eq app.router.routes.len(), 1;
+}
+
+test "register multiple routes" {
+    let app = Engine.default();
+
+    app.get("/", |ctx| { ctx.string("home"); });
+    app.post("/users", |ctx| { ctx.string("create"); });
+    app.put("/users/:id", |ctx| { ctx.string("update"); });
+
+    assert_eq app.router.routes.len(), 3;
+}
+
+test "add middleware" {
+    let app = Engine.default();
+
+    app.use(|ctx| {
+        try ctx.next();
+    });
+
+    app.use(|ctx| {
+        try ctx.next();
+    });
+
+    assert_eq app.middleware.len(), 2;
+}

@@ -1,0 +1,251 @@
+/// Router for HTTP route matching
+///
+/// Router handles route registration and matching with support for
+/// path parameters (e.g., /users/:id) and multiple HTTP methods.
+
+use context.HandlerFunc;
+
+/// Worker execution mode for routes
+pub enum WorkerMode {
+    /// Use spawn for concurrent execution (default, single-threaded)
+    Spawn,
+
+    /// Use WorkerPool for parallel execution (multi-threaded)
+    Worker,
+}
+
+/// Route definition
+pub struct Route {
+    /// HTTP method (GET, POST, etc.)
+    pub method: string,
+
+    /// Route path pattern (e.g., "/users/:id")
+    pub path: string,
+
+    /// Handler function
+    pub handler: HandlerFunc,
+
+    /// Execution mode (spawn vs worker pool)
+    pub worker_mode: WorkerMode = WorkerMode.Spawn,
+}
+
+/// Route matching result
+pub struct RouteMatch {
+    /// Matched route
+    pub route: Route,
+
+    /// Extracted path parameters
+    pub params: <string, string>,
+}
+
+/// HTTP Router
+pub struct Router {
+    /// Registered routes
+    pub routes: [Route],
+}
+
+impl Router {
+    /// Create a new empty Router
+    pub fn new(): Router {
+        return Router {
+            routes: [],
+        };
+    }
+
+    /// Add a route to the router
+    ///
+    /// # Arguments
+    /// * `method` - HTTP method (GET, POST, etc.)
+    /// * `path` - Route path (supports :param syntax)
+    /// * `handler` - Handler function
+    pub fn add_route(self, method: string, path: string, handler: HandlerFunc) {
+        let route = Route {
+            method: method.to_uppercase(),
+            path,
+            handler,
+        };
+        self.routes.push(route);
+    }
+
+    /// Match an incoming request to a route
+    ///
+    /// # Arguments
+    /// * `method` - HTTP method of request
+    /// * `path` - Request path
+    ///
+    /// # Returns
+    /// RouteMatch if found, nil otherwise
+    pub fn match(self, method: string, path: string): RouteMatch? {
+        let method_upper = method.to_uppercase();
+
+        for (let route in self.routes) {
+            if (route.method != method_upper) {
+                continue;
+            }
+
+            let params = Router.match_path(route.path, path);
+            if (let p = params) {
+                return RouteMatch {
+                    route,
+                    params: p,
+                };
+            }
+        }
+
+        return nil;
+    }
+
+    /// Match a route path pattern against a request path
+    ///
+    /// # Arguments
+    /// * `pattern` - Route pattern (e.g., "/users/:id")
+    /// * `path` - Request path (e.g., "/users/123")
+    ///
+    /// # Returns
+    /// Extracted parameters if matched, nil otherwise
+    fn match_path(pattern: string, path: string): <string, string>? {
+        let pattern_parts = pattern.split("/");
+        let path_parts = path.split("/");
+
+        // Must have same number of segments
+        if (pattern_parts.len() != path_parts.len()) {
+            return nil;
+        }
+
+        let params: <string, string> = {:};
+
+        for (let i in 0..pattern_parts.len()) {
+            let pattern_part = pattern_parts[i];
+            let path_part = path_parts[i];
+
+            // Check if this is a parameter (starts with :)
+            if (pattern_part.len() > 0 && pattern_part.starts_with(":")) {
+                // Extract parameter name (remove the :)
+                let param_name = pattern_part.substring(1, pattern_part.len());
+                params[param_name] = path_part;
+            } else if (pattern_part != path_part) {
+                // Literal segments must match exactly
+                return nil;
+            }
+        }
+
+        return params;
+    }
+}
+
+// ============================================
+// Tests
+// ============================================
+
+test "create empty router" {
+    let router = Router.new();
+    assert_eq router.routes.len(), 0;
+}
+
+test "add routes" {
+    let router = Router.new();
+
+    router.add_route("GET", "/", |ctx| {});
+    router.add_route("POST", "/users", |ctx| {});
+
+    assert_eq router.routes.len(), 2;
+    assert_eq router.routes[0].method, "GET";
+    assert_eq router.routes[1].method, "POST";
+}
+
+test "match exact path" {
+    let router = Router.new();
+    router.add_route("GET", "/users", |ctx| {});
+
+    let result = router.match("GET", "/users");
+    assert result != nil;
+
+    if (let match = result) {
+        assert_eq match.route.path, "/users";
+        assert_eq match.params.len(), 0;
+    }
+}
+
+test "match with path parameter" {
+    let router = Router.new();
+    router.add_route("GET", "/users/:id", |ctx| {});
+
+    let result = router.match("GET", "/users/123");
+    assert result != nil;
+
+    if (let match = result) {
+        assert_eq match.route.path, "/users/:id";
+        assert_eq match.params.get("id"), "123";
+    }
+}
+
+test "match with multiple parameters" {
+    let router = Router.new();
+    router.add_route("GET", "/users/:userId/posts/:postId", |ctx| {});
+
+    let result = router.match("GET", "/users/42/posts/99");
+    assert result != nil;
+
+    if (let match = result) {
+        assert_eq match.params.get("userId"), "42";
+        assert_eq match.params.get("postId"), "99";
+    }
+}
+
+test "no match for different method" {
+    let router = Router.new();
+    router.add_route("GET", "/users", |ctx| {});
+
+    let result = router.match("POST", "/users");
+    assert result == nil;
+}
+
+test "no match for different path" {
+    let router = Router.new();
+    router.add_route("GET", "/users", |ctx| {});
+
+    let result = router.match("GET", "/posts");
+    assert result == nil;
+}
+
+test "no match for different segment count" {
+    let router = Router.new();
+    router.add_route("GET", "/users/:id", |ctx| {});
+
+    let result = router.match("GET", "/users");
+    assert result == nil;
+
+    let result2 = router.match("GET", "/users/123/extra");
+    assert result2 == nil;
+}
+
+test "method matching is case insensitive" {
+    let router = Router.new();
+    router.add_route("GET", "/test", |ctx| {});
+
+    let result = router.match("get", "/test");
+    assert result != nil;
+}
+
+test "match path static function" {
+    let params = Router.match_path("/users/:id", "/users/123");
+    assert params != nil;
+
+    if (let p = params) {
+        assert_eq p.get("id"), "123";
+    }
+}
+
+test "match path no parameters" {
+    let params = Router.match_path("/users", "/users");
+    assert params != nil;
+
+    if (let p = params) {
+        assert_eq p.len(), 0;
+    }
+}
+
+test "match path no match" {
+    let params = Router.match_path("/users", "/posts");
+    assert params == nil;
+}

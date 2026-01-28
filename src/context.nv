@@ -15,6 +15,7 @@
 
 use request.Request;
 use response.Response;
+use worker_context.{WorkerContext, WorkerResponse};
 
 /// Handler function type
 /// All handlers and middleware use this signature
@@ -42,6 +43,12 @@ struct Context {
     
     /// Whether the handler chain was aborted
     aborted: bool = false,
+
+    /// Whether this handler is running in a worker pool thread
+    in_worker: bool = false,
+
+    /// Worker pool size (0 if not using worker pool)
+    worker_size: int = 0,
 }
 
 impl Context {
@@ -325,6 +332,43 @@ impl Context {
         }
         return nil;
     }
+
+    // ============================================
+    // Worker pool support
+    // ============================================
+
+    /// Check if handler is running in a worker pool thread
+    ///
+    /// # Returns
+    /// true if running in worker pool, false otherwise
+    pub fn in_worker_pool(self): bool {
+        return self.in_worker;
+    }
+
+    /// Get the worker pool size
+    ///
+    /// # Returns
+    /// Worker pool size, or 0 if not using worker pool
+    pub fn worker_pool_size(self): int {
+        return self.worker_size;
+    }
+
+    /// Convert Context to serializable WorkerContext
+    ///
+    /// Used to send request data to worker threads.
+    ///
+    /// # Returns
+    /// WorkerContext with serializable request data
+    pub fn to_worker_context(self): WorkerContext {
+        return WorkerContext.new(
+            self.request.path,
+            self.request.method,
+            self.request.headers,
+            self.request.query_params,
+            self.params,
+            self.request.body
+        );
+    }
 }
 
 // ============================================
@@ -388,7 +432,29 @@ test "path params" {
     let req = try! Request.parse("GET /users/123 HTTP/1.1\r\nHost: localhost\r\n\r\n");
     let params: <string, string> = {"id": "123"};
     let ctx = Context.with_handlers(req, [], params);
-    
+
     assert_eq ctx.param("id"), "123";
     assert_eq ctx.param("missing"), nil;
+}
+
+test "check not in worker pool by default" {
+    let req = try! Request.parse("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n");
+    let ctx = Context.new(req, Response.new());
+
+    assert_eq ctx.in_worker_pool(), false;
+    assert_eq ctx.worker_pool_size(), 0;
+}
+
+test "convert context to worker context" {
+    let req = try! Request.parse("GET /users/123?page=1 HTTP/1.1\r\nHost: localhost\r\n\r\nbody");
+    let params: <string, string> = {"id": "123"};
+    let ctx = Context.with_handlers(req, [], params);
+
+    let worker_ctx = ctx.to_worker_context();
+
+    assert_eq worker_ctx.path, "/users/123";
+    assert_eq worker_ctx.method, "GET";
+    assert_eq worker_ctx.params.get("id"), "123";
+    assert_eq worker_ctx.query.get("page"), "1";
+    assert_eq worker_ctx.body, "body";
 }

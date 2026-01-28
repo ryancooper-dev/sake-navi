@@ -1,0 +1,324 @@
+/// Serializable request context for WorkerPool
+///
+/// WorkerContext is a serializable version of Context that can be
+/// sent across thread boundaries to worker threads. It contains only
+/// the essential request data without closures or non-serializable types.
+
+use std.json;
+
+/// Serializable request context for worker threads
+pub struct WorkerContext {
+    /// Request path
+    pub path: string,
+
+    /// HTTP method
+    pub method: string,
+
+    /// Request headers
+    pub headers: <string, string>,
+
+    /// Query parameters
+    pub query: <string, string>,
+
+    /// Path parameters (from route matching)
+    pub params: <string, string>,
+
+    /// Request body
+    pub body: string,
+}
+
+impl WorkerContext {
+    /// Create a new WorkerContext
+    pub fn new(
+        path: string,
+        method: string,
+        headers: <string, string>,
+        query: <string, string>,
+        params: <string, string>,
+        body: string
+    ): WorkerContext {
+        return WorkerContext {
+            path,
+            method,
+            headers,
+            query,
+            params,
+            body,
+        };
+    }
+
+    /// Serialize to JSON string
+    ///
+    /// # Returns
+    /// JSON string representation
+    ///
+    /// # Errors
+    /// Throws if JSON encoding fails
+    pub fn to_json(self): string throws {
+        let obj = {
+            "path": self.path,
+            "method": self.method,
+            "headers": self.headers,
+            "query": self.query,
+            "params": self.params,
+            "body": self.body,
+        };
+        return try json.encode(obj);
+    }
+
+    /// Deserialize from JSON string
+    ///
+    /// # Arguments
+    /// * `json_str` - JSON string to parse
+    ///
+    /// # Returns
+    /// WorkerContext instance
+    ///
+    /// # Errors
+    /// Throws if JSON is invalid or missing required fields
+    pub fn from_json(json_str: string): WorkerContext throws {
+        let obj = try json.decode::<any>(json_str);
+
+        // Extract fields from decoded object
+        let path = obj.path as string;
+        let method = obj.method as string;
+        let headers = obj.headers as <string, string>;
+        let query = obj.query as <string, string>;
+        let params = obj.params as <string, string>;
+        let body = obj.body as string;
+
+        return WorkerContext {
+            path,
+            method,
+            headers,
+            query,
+            params,
+            body,
+        };
+    }
+}
+
+/// Serializable response from worker threads
+pub struct WorkerResponse {
+    /// HTTP status code
+    pub status: int,
+
+    /// Response headers
+    pub headers: <string, string>,
+
+    /// Response body
+    pub body: string,
+}
+
+impl WorkerResponse {
+    /// Create a new WorkerResponse
+    pub fn new(status: int, headers: <string, string>, body: string): WorkerResponse {
+        return WorkerResponse {
+            status,
+            headers,
+            body,
+        };
+    }
+
+    /// Create a successful JSON response
+    pub fn json(status: int, body: string): WorkerResponse {
+        let headers: <string, string> = {
+            "Content-Type": "application/json; charset=utf-8",
+        };
+        return WorkerResponse {
+            status,
+            headers,
+            body,
+        };
+    }
+
+    /// Create a plain text response
+    pub fn text(status: int, body: string): WorkerResponse {
+        let headers: <string, string> = {
+            "Content-Type": "text/plain; charset=utf-8",
+        };
+        return WorkerResponse {
+            status,
+            headers,
+            body,
+        };
+    }
+
+    /// Serialize to JSON string
+    ///
+    /// # Returns
+    /// JSON string representation
+    ///
+    /// # Errors
+    /// Throws if JSON encoding fails
+    pub fn to_json(self): string throws {
+        let obj = {
+            "status": self.status,
+            "headers": self.headers,
+            "body": self.body,
+        };
+        return try json.encode(obj);
+    }
+
+    /// Deserialize from JSON string
+    ///
+    /// # Arguments
+    /// * `json_str` - JSON string to parse
+    ///
+    /// # Returns
+    /// WorkerResponse instance
+    ///
+    /// # Errors
+    /// Throws if JSON is invalid or missing required fields
+    pub fn from_json(json_str: string): WorkerResponse throws {
+        let obj = try json.decode::<any>(json_str);
+
+        let status = obj.status as int;
+        let headers = obj.headers as <string, string>;
+        let body = obj.body as string;
+
+        return WorkerResponse {
+            status,
+            headers,
+            body,
+        };
+    }
+}
+
+// ============================================
+// Tests
+// ============================================
+
+test "create worker context" {
+    let headers: <string, string> = {"host": "localhost"};
+    let query: <string, string> = {"page": "1"};
+    let params: <string, string> = {"id": "123"};
+
+    let ctx = WorkerContext.new(
+        "/users/123",
+        "GET",
+        headers,
+        query,
+        params,
+        ""
+    );
+
+    assert_eq ctx.path, "/users/123";
+    assert_eq ctx.method, "GET";
+    assert_eq ctx.params.get("id"), "123";
+}
+
+test "serialize worker context to json" {
+    let headers: <string, string> = {"host": "localhost"};
+    let query: <string, string> = {"page": "1"};
+    let params: <string, string> = {"id": "123"};
+
+    let ctx = WorkerContext.new(
+        "/users/123",
+        "GET",
+        headers,
+        query,
+        params,
+        "body content"
+    );
+
+    let json_str = try! ctx.to_json();
+
+    assert json_str.len() > 0;
+    assert json_str.contains("\"path\"");
+    assert json_str.contains("\"method\"");
+    assert json_str.contains("/users/123");
+}
+
+test "deserialize worker context from json" {
+    let json_str = "{\"path\":\"/test\",\"method\":\"POST\",\"headers\":{\"host\":\"localhost\"},\"query\":{},\"params\":{\"id\":\"1\"},\"body\":\"test\"}";
+
+    let ctx = try! WorkerContext.from_json(json_str);
+
+    assert_eq ctx.path, "/test";
+    assert_eq ctx.method, "POST";
+    assert_eq ctx.headers.get("host"), "localhost";
+    assert_eq ctx.params.get("id"), "1";
+    assert_eq ctx.body, "test";
+}
+
+test "worker context roundtrip serialization" {
+    let headers: <string, string> = {"content-type": "application/json"};
+    let query: <string, string> = {"filter": "active"};
+    let params: <string, string> = {"userId": "42"};
+
+    let original = WorkerContext.new(
+        "/api/users/42",
+        "PUT",
+        headers,
+        query,
+        params,
+        "{\"name\":\"John\"}"
+    );
+
+    let json_str = try! original.to_json();
+    let restored = try! WorkerContext.from_json(json_str);
+
+    assert_eq restored.path, original.path;
+    assert_eq restored.method, original.method;
+    assert_eq restored.body, original.body;
+    assert_eq restored.params.get("userId"), "42";
+}
+
+test "create worker response" {
+    let headers: <string, string> = {"Content-Type": "text/plain"};
+    let resp = WorkerResponse.new(200, headers, "OK");
+
+    assert_eq resp.status, 200;
+    assert_eq resp.body, "OK";
+}
+
+test "worker response json helper" {
+    let resp = WorkerResponse.json(200, "{\"ok\": true}");
+
+    assert_eq resp.status, 200;
+    assert_eq resp.headers.get("Content-Type"), "application/json; charset=utf-8";
+    assert_eq resp.body, "{\"ok\": true}";
+}
+
+test "worker response text helper" {
+    let resp = WorkerResponse.text(404, "Not Found");
+
+    assert_eq resp.status, 404;
+    assert_eq resp.headers.get("Content-Type"), "text/plain; charset=utf-8";
+    assert_eq resp.body, "Not Found";
+}
+
+test "serialize worker response to json" {
+    let headers: <string, string> = {"X-Custom": "value"};
+    let resp = WorkerResponse.new(201, headers, "Created");
+
+    let json_str = try! resp.to_json();
+
+    assert json_str.len() > 0;
+    assert json_str.contains("\"status\"");
+    assert json_str.contains("201");
+    assert json_str.contains("Created");
+}
+
+test "deserialize worker response from json" {
+    let json_str = "{\"status\":500,\"headers\":{\"Content-Type\":\"text/plain\"},\"body\":\"Error\"}";
+
+    let resp = try! WorkerResponse.from_json(json_str);
+
+    assert_eq resp.status, 500;
+    assert_eq resp.headers.get("Content-Type"), "text/plain";
+    assert_eq resp.body, "Error";
+}
+
+test "worker response roundtrip serialization" {
+    let headers: <string, string> = {"Cache-Control": "no-cache"};
+    let original = WorkerResponse.new(304, headers, "");
+
+    let json_str = try! original.to_json();
+    let restored = try! WorkerResponse.from_json(json_str);
+
+    assert_eq restored.status, original.status;
+    assert_eq restored.body, original.body;
+    assert_eq restored.headers.get("Cache-Control"), "no-cache";
+}
