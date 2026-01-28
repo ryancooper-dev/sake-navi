@@ -20,26 +20,35 @@
 use sake.Engine;
 
 fn main() throws {
-    let app = Engine.new();
-    
+    let app = Engine.default();
+
     // Simple route
     app.get("/", |ctx| {
         ctx.string("Hello, Sake! 🍶");
     });
-    
-    // JSON response
+
+    // JSON response with path parameter
     app.get("/api/users/:id", |ctx| {
         let id = ctx.param("id");
-        ctx.json({
+        try? ctx.json({
             "id": id,
             "name": "Navi User",
         });
     });
-    
+
+    // CPU-intensive route with WorkerPool
+    app.get("/compute/:n", |ctx| {
+        let n = try? ctx.param("n")?.parse::<int>() || 10;
+        let result = expensive_computation(n);
+        try? ctx.json({"result": result});
+    }).worker();  // ← Executes in parallel worker threads
+
     // Start server
     try app.run(":8080");
 }
 ```
+
+See [examples/](examples/) for more complete examples.
 
 ## 📦 Installation
 
@@ -49,6 +58,26 @@ Add Sake to your `navi.toml`:
 [dependencies]
 sake = "0.1"
 ```
+
+## ⚙️ Configuration
+
+```nv
+use sake.{Engine, Config};
+
+let config = Config.default()
+    .with_worker_pool_size(8)       // 8 worker threads (0 = auto-detect)
+    .with_max_connections(10000)    // Max concurrent connections
+    .with_request_timeout(30000);   // 30 second timeout
+
+let app = Engine.new(config);
+```
+
+**Configuration Options:**
+
+- `worker_pool_size` - Number of worker threads (0 = auto-detect via `vm.num_cpus()`)
+- `enable_worker_pool` - Enable/disable WorkerPool (default: true)
+- `max_connections` - Maximum concurrent connections (default: 10000)
+- `request_timeout` - Request timeout in milliseconds (default: 30000)
 
 ## 📖 Documentation
 

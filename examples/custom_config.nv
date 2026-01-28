@@ -1,0 +1,61 @@
+/// Custom Configuration Example
+///
+/// Demonstrates how to configure Sake for different deployment scenarios
+
+use sake.Engine;
+use sake.Config;
+
+fn main() throws {
+    // Option 1: High-throughput server
+    let high_throughput = Config.default()
+        .with_worker_pool_size(16)          // 16 worker threads
+        .with_max_connections(50000)        // Handle 50k connections
+        .with_request_timeout(10000);       // 10 second timeout
+
+    // Option 2: Resource-constrained environment
+    let minimal = Config.default()
+        .with_worker_pool(false)            // Disable worker pool
+        .with_max_connections(100)          // Limit to 100 connections
+        .with_request_timeout(5000);        // 5 second timeout
+
+    // Option 3: Balanced configuration (default)
+    let balanced = Config.default();        // Auto-detect optimal settings
+
+    // Choose configuration based on environment
+    let env = "development";  // or "production", "minimal"
+
+    let config = if (env == "production") {
+        high_throughput
+    } else if (env == "minimal") {
+        minimal
+    } else {
+        balanced
+    };
+
+    let app = Engine.new(config);
+
+    app.get("/", |ctx| {
+        ctx.string("Configuration Demo 🍶");
+    });
+
+    app.get("/config", |ctx| {
+        try? ctx.json({
+            "worker_pool_enabled": app.config.enable_worker_pool,
+            "worker_pool_size": app.config.effective_worker_pool_size(),
+            "max_connections": app.config.max_connections,
+            "request_timeout": app.config.request_timeout,
+        });
+    });
+
+    // CPU-bound route (only uses workers if enabled)
+    app.get("/compute", |ctx| {
+        let result = 0;
+        for (let i in 0..1000000) {
+            result += i;
+        }
+        try? ctx.json({"result": result});
+    }).worker();
+
+    println("Starting server with configuration...");
+    try app.run(":8080");
+}
