@@ -23,23 +23,23 @@ test "exact path matching" {
     router.add_route("GET", "/users/profile", |ctx| {});
 
     // Should match
-    assert router.match("GET", "/") != nil;
-    assert router.match("GET", "/users") != nil;
-    assert router.match("GET", "/users/profile") != nil;
+    assert router.find_match("GET", "/") != nil;
+    assert router.find_match("GET", "/users") != nil;
+    assert router.find_match("GET", "/users/profile") != nil;
 
     // Should not match
-    assert router.match("GET", "/user") == nil;
-    assert router.match("GET", "/users/") == nil;
-    assert router.match("GET", "/users/profile/extra") == nil;
+    assert router.find_match("GET", "/user") == nil;
+    assert router.find_match("GET", "/users/") == nil;
+    assert router.find_match("GET", "/users/profile/extra") == nil;
 }
 
 test "method matching is case insensitive" {
     let router = Router.new();
     router.add_route("GET", "/test", |ctx| {});
 
-    assert router.match("get", "/test") != nil;
-    assert router.match("Get", "/test") != nil;
-    assert router.match("GET", "/test") != nil;
+    assert router.find_match("get", "/test") != nil;
+    assert router.find_match("Get", "/test") != nil;
+    assert router.find_match("GET", "/test") != nil;
 }
 
 test "different methods same path" {
@@ -48,9 +48,9 @@ test "different methods same path" {
     router.add_route("POST", "/users", |ctx| {});
     router.add_route("DELETE", "/users", |ctx| {});
 
-    let get_match = router.match("GET", "/users");
-    let post_match = router.match("POST", "/users");
-    let delete_match = router.match("DELETE", "/users");
+    let get_match = router.find_match("GET", "/users");
+    let post_match = router.find_match("POST", "/users");
+    let delete_match = router.find_match("DELETE", "/users");
 
     assert get_match != nil;
     assert post_match != nil;
@@ -73,11 +73,11 @@ test "single path parameter" {
     let router = Router.new();
     router.add_route("GET", "/users/:id", |ctx| {});
 
-    let result = router.match("GET", "/users/123");
+    let result = router.find_match("GET", "/users/123");
     assert result != nil;
 
-    if (let match = result) {
-        assert_eq match.params.get("id"), "123";
+    if (let m = result) {
+        assert_eq m.params.get("id"), "123";
     }
 }
 
@@ -85,12 +85,12 @@ test "multiple path parameters" {
     let router = Router.new();
     router.add_route("GET", "/users/:userId/posts/:postId", |ctx| {});
 
-    let result = router.match("GET", "/users/42/posts/99");
+    let result = router.find_match("GET", "/users/42/posts/99");
     assert result != nil;
 
-    if (let match = result) {
-        assert_eq match.params.get("userId"), "42";
-        assert_eq match.params.get("postId"), "99";
+    if (let m = result) {
+        assert_eq m.params.get("userId"), "42";
+        assert_eq m.params.get("postId"), "99";
     }
 }
 
@@ -98,11 +98,11 @@ test "path parameter with special characters" {
     let router = Router.new();
     router.add_route("GET", "/files/:filename", |ctx| {});
 
-    let result = router.match("GET", "/files/report-2024.pdf");
+    let result = router.find_match("GET", "/files/report-2024.pdf");
     assert result != nil;
 
-    if (let match = result) {
-        assert_eq match.params.get("filename"), "report-2024.pdf";
+    if (let m = result) {
+        assert_eq m.params.get("filename"), "report-2024.pdf";
     }
 }
 
@@ -114,11 +114,11 @@ test "wildcard captures single segment" {
     let router = Router.new();
     router.add_route("GET", "/static/*filepath", |ctx| {});
 
-    let result = router.match("GET", "/static/style.css");
+    let result = router.find_match("GET", "/static/style.css");
     assert result != nil;
 
-    if (let match = result) {
-        assert_eq match.params.get("filepath"), "style.css";
+    if (let m = result) {
+        assert_eq m.params.get("filepath"), "style.css";
     }
 }
 
@@ -126,11 +126,11 @@ test "wildcard captures multiple segments" {
     let router = Router.new();
     router.add_route("GET", "/static/*filepath", |ctx| {});
 
-    let result = router.match("GET", "/static/css/vendor/bootstrap.min.css");
+    let result = router.find_match("GET", "/static/css/vendor/bootstrap.min.css");
     assert result != nil;
 
-    if (let match = result) {
-        assert_eq match.params.get("filepath"), "css/vendor/bootstrap.min.css";
+    if (let m = result) {
+        assert_eq m.params.get("filepath"), "css/vendor/bootstrap.min.css";
     }
 }
 
@@ -138,11 +138,11 @@ test "wildcard with prefix path" {
     let router = Router.new();
     router.add_route("GET", "/api/v1/*path", |ctx| {});
 
-    let result = router.match("GET", "/api/v1/users/123/posts");
+    let result = router.find_match("GET", "/api/v1/users/123/posts");
     assert result != nil;
 
-    if (let match = result) {
-        assert_eq match.params.get("path"), "users/123/posts";
+    if (let m = result) {
+        assert_eq m.params.get("path"), "users/123/posts";
     }
 }
 
@@ -151,7 +151,7 @@ test "wildcard does not match without trailing path" {
     router.add_route("GET", "/static/*filepath", |ctx| {});
 
     // Should not match - wildcard needs at least one segment
-    let result = router.match("GET", "/static");
+    let result = router.find_match("GET", "/static");
     assert result == nil;
 }
 
@@ -159,12 +159,12 @@ test "mixed parameters and wildcard" {
     let router = Router.new();
     router.add_route("GET", "/users/:id/files/*filepath", |ctx| {});
 
-    let result = router.match("GET", "/users/42/files/docs/report.pdf");
+    let result = router.find_match("GET", "/users/42/files/docs/report.pdf");
     assert result != nil;
 
-    if (let match = result) {
-        assert_eq match.params.get("id"), "42";
-        assert_eq match.params.get("filepath"), "docs/report.pdf";
+    if (let m = result) {
+        assert_eq m.params.get("id"), "42";
+        assert_eq m.params.get("filepath"), "docs/report.pdf";
     }
 }
 
@@ -375,20 +375,20 @@ test "group route can use worker mode" {
 test "empty router matches nothing" {
     let router = Router.new();
 
-    assert router.match("GET", "/") == nil;
-    assert router.match("GET", "/anything") == nil;
+    assert router.find_match("GET", "/") == nil;
+    assert router.find_match("GET", "/anything") == nil;
 }
 
 test "parameter names are preserved" {
     let router = Router.new();
     router.add_route("GET", "/users/:user_id/posts/:post_id", |ctx| {});
 
-    let result = router.match("GET", "/users/123/posts/456");
+    let result = router.find_match("GET", "/users/123/posts/456");
     assert result != nil;
 
-    if (let match = result) {
-        assert_eq match.params.get("user_id"), "123";
-        assert_eq match.params.get("post_id"), "456";
+    if (let m = result) {
+        assert_eq m.params.get("user_id"), "123";
+        assert_eq m.params.get("post_id"), "456";
     }
 }
 
@@ -396,11 +396,11 @@ test "wildcard parameter name is preserved" {
     let router = Router.new();
     router.add_route("GET", "/files/*file_path", |ctx| {});
 
-    let result = router.match("GET", "/files/docs/readme.md");
+    let result = router.find_match("GET", "/files/docs/readme.md");
     assert result != nil;
 
-    if (let match = result) {
-        assert_eq match.params.get("file_path"), "docs/readme.md";
+    if (let m = result) {
+        assert_eq m.params.get("file_path"), "docs/readme.md";
     }
 }
 
@@ -409,8 +409,8 @@ test "empty path segments handled correctly" {
     router.add_route("GET", "/users", |ctx| {});
 
     // Double slashes should not match
-    assert router.match("GET", "//users") == nil;
-    assert router.match("GET", "/users//") == nil;
+    assert router.find_match("GET", "//users") == nil;
+    assert router.find_match("GET", "/users//") == nil;
 }
 
 // ============================================
@@ -425,13 +425,13 @@ test "routes matched in registration order" {
     router.add_route("GET", "/users/:id", |ctx| {});
 
     // Should match exact route, not parameter route
-    let result = router.match("GET", "/users/admin");
+    let result = router.find_match("GET", "/users/admin");
     assert result != nil;
 
-    if (let match = result) {
-        assert_eq match.route.path, "/users/admin";
+    if (let m = result) {
+        assert_eq m.route.path, "/users/admin";
         // Should have no parameters
-        assert_eq match.params.len(), 0;
+        assert_eq m.params.len(), 0;
     }
 }
 
@@ -442,20 +442,20 @@ test "wildcard vs parameter priority" {
     router.add_route("GET", "/files/*path", |ctx| {});
 
     // Parameter route matches first (single segment)
-    let result = router.match("GET", "/files/123");
+    let result = router.find_match("GET", "/files/123");
     assert result != nil;
 
-    if (let match = result) {
-        assert_eq match.route.path, "/files/:id";
-        assert_eq match.params.get("id"), "123";
+    if (let m = result) {
+        assert_eq m.route.path, "/files/:id";
+        assert_eq m.params.get("id"), "123";
     }
 
     // Wildcard matches multiple segments
-    let result2 = router.match("GET", "/files/docs/readme.md");
+    let result2 = router.find_match("GET", "/files/docs/readme.md");
     assert result2 != nil;
 
-    if (let match = result2) {
-        assert_eq match.route.path, "/files/*path";
-        assert_eq match.params.get("path"), "docs/readme.md";
+    if (let m = result2) {
+        assert_eq m.route.path, "/files/*path";
+        assert_eq m.params.get("path"), "docs/readme.md";
     }
 }
