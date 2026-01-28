@@ -1,0 +1,427 @@
+/// Comprehensive Context Tests for Sake Framework
+///
+/// Tests all Context API methods:
+/// - Request data access (query, param, header, body)
+/// - Query helpers (default_query)
+/// - Response methods (json, string, html, xml, yaml, data)
+/// - Status and headers
+/// - Middleware control (next, abort)
+/// - Context data (set, get, get_string, get_int, get_bool, get_float)
+/// - Binding (bind_json)
+
+use context.{Context, HandlerFunc};
+use request.Request;
+use response.Response;
+
+// ============================================
+// Request Data Access
+// ============================================
+
+test "query parameter access" {
+    let raw = "GET /users?page=2&limit=10 HTTP/1.1\r\n\r\n";
+    let request = try! Request.parse(raw);
+    let ctx = Context.new(request, Response.new());
+
+    assert_eq ctx.query("page"), "2";
+    assert_eq ctx.query("limit"), "10";
+    assert ctx.query("missing") == nil;
+}
+
+test "default_query with existing parameter" {
+    let raw = "GET /users?page=5 HTTP/1.1\r\n\r\n";
+    let request = try! Request.parse(raw);
+    let ctx = Context.new(request, Response.new());
+
+    assert_eq ctx.default_query("page", "1"), "5";
+}
+
+test "default_query with missing parameter" {
+    let raw = "GET /users HTTP/1.1\r\n\r\n";
+    let request = try! Request.parse(raw);
+    let ctx = Context.new(request, Response.new());
+
+    assert_eq ctx.default_query("page", "1"), "1";
+    assert_eq ctx.default_query("limit", "20"), "20";
+}
+
+test "path parameter access" {
+    let raw = "GET /users/123 HTTP/1.1\r\n\r\n";
+    let request = try! Request.parse(raw);
+    let ctx = Context.with_params(request, {"id": "123"});
+
+    assert_eq ctx.param("id"), "123";
+    assert ctx.param("missing") == nil;
+}
+
+test "header access" {
+    let raw = "GET / HTTP/1.1\r\nContent-Type: application/json\r\nAuthorization: Bearer token123\r\n\r\n";
+    let request = try! Request.parse(raw);
+    let ctx = Context.new(request, Response.new());
+
+    assert_eq ctx.header("content-type"), "application/json";
+    assert_eq ctx.header("authorization"), "Bearer token123";
+    assert ctx.header("missing") == nil;
+}
+
+test "body access" {
+    let raw = "POST / HTTP/1.1\r\nContent-Length: 13\r\n\r\n{\"key\":\"val\"}";
+    let request = try! Request.parse(raw);
+    let ctx = Context.new(request, Response.new());
+
+    assert_eq ctx.body(), "{\"key\":\"val\"}";
+}
+
+test "method access" {
+    let raw = "POST /users HTTP/1.1\r\n\r\n";
+    let request = try! Request.parse(raw);
+    let ctx = Context.new(request, Response.new());
+
+    assert_eq ctx.method(), "POST";
+}
+
+test "path access" {
+    let raw = "GET /api/users?page=1 HTTP/1.1\r\n\r\n";
+    let request = try! Request.parse(raw);
+    let ctx = Context.new(request, Response.new());
+
+    assert_eq ctx.path(), "/api/users";
+}
+
+test "uri access" {
+    let raw = "GET /api/users?page=1 HTTP/1.1\r\n\r\n";
+    let request = try! Request.parse(raw);
+    let ctx = Context.new(request, Response.new());
+
+    assert_eq ctx.uri(), "/api/users?page=1";
+}
+
+test "content_type access" {
+    let raw = "POST / HTTP/1.1\r\nContent-Type: application/json\r\n\r\n";
+    let request = try! Request.parse(raw);
+    let ctx = Context.new(request, Response.new());
+
+    assert_eq ctx.content_type(), "application/json";
+}
+
+// ============================================
+// Response Methods
+// ============================================
+
+test "json response" {
+    let raw = "GET / HTTP/1.1\r\n\r\n";
+    let request = try! Request.parse(raw);
+    let ctx = Context.new(request, Response.new());
+
+    try! ctx.json({"message": "hello", "count": 42});
+
+    // Verify response has JSON content type
+    let response_text = ctx.response.build();
+    assert response_text.contains("Content-Type: application/json");
+}
+
+test "string response" {
+    let raw = "GET / HTTP/1.1\r\n\r\n";
+    let request = try! Request.parse(raw);
+    let ctx = Context.new(request, Response.new());
+
+    ctx.string("Hello, World!");
+
+    let response_text = ctx.response.build();
+    assert response_text.contains("Content-Type: text/plain");
+    assert response_text.contains("Hello, World!");
+}
+
+test "html response" {
+    let raw = "GET / HTTP/1.1\r\n\r\n";
+    let request = try! Request.parse(raw);
+    let ctx = Context.new(request, Response.new());
+
+    ctx.html("<h1>Hello</h1>");
+
+    let response_text = ctx.response.build();
+    assert response_text.contains("Content-Type: text/html");
+    assert response_text.contains("<h1>Hello</h1>");
+}
+
+test "xml response" {
+    let raw = "GET / HTTP/1.1\r\n\r\n";
+    let request = try! Request.parse(raw);
+    let ctx = Context.new(request, Response.new());
+
+    ctx.xml("<user><name>Alice</name></user>");
+
+    let response_text = ctx.response.build();
+    assert response_text.contains("Content-Type: application/xml");
+    assert response_text.contains("<user>");
+}
+
+test "yaml response" {
+    let raw = "GET / HTTP/1.1\r\n\r\n";
+    let request = try! Request.parse(raw);
+    let ctx = Context.new(request, Response.new());
+
+    ctx.yaml("name: Alice\nage: 30\n");
+
+    let response_text = ctx.response.build();
+    assert response_text.contains("Content-Type: application/yaml");
+    assert response_text.contains("name: Alice");
+}
+
+test "data response" {
+    let raw = "GET / HTTP/1.1\r\n\r\n";
+    let request = try! Request.parse(raw);
+    let ctx = Context.new(request, Response.new());
+
+    ctx.data("application/octet-stream", "binary data");
+
+    let response_text = ctx.response.build();
+    assert response_text.contains("Content-Type: application/octet-stream");
+}
+
+test "status code" {
+    let raw = "GET / HTTP/1.1\r\n\r\n";
+    let request = try! Request.parse(raw);
+    let ctx = Context.new(request, Response.new());
+
+    ctx.status(201);
+
+    let response_text = ctx.response.build();
+    assert response_text.contains("201");
+}
+
+test "set header" {
+    let raw = "GET / HTTP/1.1\r\n\r\n";
+    let request = try! Request.parse(raw);
+    let ctx = Context.new(request, Response.new());
+
+    ctx.set_header("X-Custom", "value123");
+
+    let response_text = ctx.response.build();
+    assert response_text.contains("X-Custom: value123");
+}
+
+test "redirect" {
+    let raw = "GET / HTTP/1.1\r\n\r\n";
+    let request = try! Request.parse(raw);
+    let ctx = Context.new(request, Response.new());
+
+    ctx.redirect(302, "/new-location");
+
+    let response_text = ctx.response.build();
+    assert response_text.contains("302");
+    assert response_text.contains("Location: /new-location");
+}
+
+// ============================================
+// Middleware Control
+// ============================================
+
+test "abort stops handler chain" {
+    let raw = "GET / HTTP/1.1\r\n\r\n";
+    let request = try! Request.parse(raw);
+
+    let handler1 = |ctx| {
+        ctx.set("step1", true);
+        ctx.abort();
+    };
+
+    let handler2 = |ctx| {
+        ctx.set("step2", true);
+    };
+
+    let ctx = Context.with_handlers(request, [handler1, handler2], {:});
+
+    try! ctx.next();
+
+    // Step 1 should execute, step 2 should not
+    assert ctx.get("step1") != nil;
+    assert ctx.get("step2") == nil;
+    assert ctx.is_aborted();
+}
+
+test "abort_with_status sets status code" {
+    let raw = "GET / HTTP/1.1\r\n\r\n";
+    let request = try! Request.parse(raw);
+    let ctx = Context.new(request, Response.new());
+
+    ctx.abort_with_status(404);
+
+    assert ctx.is_aborted();
+    let response_text = ctx.response.build();
+    assert response_text.contains("404");
+}
+
+test "abort_with_error sends JSON error" {
+    let raw = "GET / HTTP/1.1\r\n\r\n";
+    let request = try! Request.parse(raw);
+    let ctx = Context.new(request, Response.new());
+
+    ctx.abort_with_error(400, "Bad Request");
+
+    assert ctx.is_aborted();
+    let response_text = ctx.response.build();
+    assert response_text.contains("400");
+    assert response_text.contains("Bad Request");
+}
+
+test "next executes handler chain in order" {
+    let raw = "GET / HTTP/1.1\r\n\r\n";
+    let request = try! Request.parse(raw);
+
+    let order: [string] = [];
+
+    let handler1 = |ctx| {
+        order.push("h1-before");
+        try ctx.next();
+        order.push("h1-after");
+    };
+
+    let handler2 = |ctx| {
+        order.push("h2-before");
+        try ctx.next();
+        order.push("h2-after");
+    };
+
+    let handler3 = |ctx| {
+        order.push("h3");
+    };
+
+    let ctx = Context.with_handlers(request, [handler1, handler2, handler3], {:});
+
+    try! ctx.next();
+
+    // Verify execution order
+    assert_eq order.len(), 5;
+    assert_eq order[0], "h1-before";
+    assert_eq order[1], "h2-before";
+    assert_eq order[2], "h3";
+    assert_eq order[3], "h2-after";
+    assert_eq order[4], "h1-after";
+}
+
+// ============================================
+// Context Data Storage
+// ============================================
+
+test "set and get values" {
+    let raw = "GET / HTTP/1.1\r\n\r\n";
+    let request = try! Request.parse(raw);
+    let ctx = Context.new(request, Response.new());
+
+    ctx.set("key1", "value1");
+    ctx.set("key2", 42);
+
+    assert ctx.get("key1") != nil;
+    assert ctx.get("key2") != nil;
+    assert ctx.get("missing") == nil;
+}
+
+test "get_string" {
+    let raw = "GET / HTTP/1.1\r\n\r\n";
+    let request = try! Request.parse(raw);
+    let ctx = Context.new(request, Response.new());
+
+    ctx.set("name", "Alice");
+
+    assert_eq ctx.get_string("name"), "Alice";
+    assert ctx.get_string("missing") == nil;
+}
+
+test "get_int" {
+    let raw = "GET / HTTP/1.1\r\n\r\n";
+    let request = try! Request.parse(raw);
+    let ctx = Context.new(request, Response.new());
+
+    ctx.set("age", 30);
+
+    assert_eq ctx.get_int("age"), 30;
+    assert ctx.get_int("missing") == nil;
+}
+
+test "get_bool" {
+    let raw = "GET / HTTP/1.1\r\n\r\n";
+    let request = try! Request.parse(raw);
+    let ctx = Context.new(request, Response.new());
+
+    ctx.set("active", true);
+    ctx.set("disabled", false);
+
+    assert_eq ctx.get_bool("active"), true;
+    assert_eq ctx.get_bool("disabled"), false;
+    assert ctx.get_bool("missing") == nil;
+}
+
+test "get_float" {
+    let raw = "GET / HTTP/1.1\r\n\r\n";
+    let request = try! Request.parse(raw);
+    let ctx = Context.new(request, Response.new());
+
+    ctx.set("price", 19.99);
+
+    assert_eq ctx.get_float("price"), 19.99;
+    assert ctx.get_float("missing") == nil;
+}
+
+// ============================================
+// Binding
+// ============================================
+
+test "bind_json with valid JSON" {
+    struct TestData {
+        name: string,
+        age: int,
+    }
+
+    let raw = "POST / HTTP/1.1\r\nContent-Type: application/json\r\n\r\n{\"name\":\"Alice\",\"age\":30}";
+    let request = try! Request.parse(raw);
+    let ctx = Context.new(request, Response.new());
+
+    let data = try! ctx.bind_json::<TestData>();
+
+    assert_eq data.name, "Alice";
+    assert_eq data.age, 30;
+}
+
+test "bind_json with empty body throws" {
+    struct TestData {
+        name: string,
+    }
+
+    let raw = "POST / HTTP/1.1\r\n\r\n";
+    let request = try! Request.parse(raw);
+    let ctx = Context.new(request, Response.new());
+
+    let result = try? ctx.bind_json::<TestData>();
+
+    assert result == nil;
+}
+
+// ============================================
+// Worker Pool Detection
+// ============================================
+
+test "in_worker_pool detection" {
+    let raw = "GET / HTTP/1.1\r\n\r\n";
+    let request = try! Request.parse(raw);
+    let ctx = Context.new(request, Response.new());
+
+    // Default is false
+    assert_eq ctx.in_worker_pool(), false;
+
+    // Set in_worker flag
+    ctx.in_worker = true;
+    assert_eq ctx.in_worker_pool(), true;
+}
+
+test "worker_pool_size" {
+    let raw = "GET / HTTP/1.1\r\n\r\n";
+    let request = try! Request.parse(raw);
+    let ctx = Context.new(request, Response.new());
+
+    // Default is 0
+    assert_eq ctx.worker_pool_size(), 0;
+
+    // Set worker size
+    ctx.worker_size = 8;
+    assert_eq ctx.worker_pool_size(), 8;
+}

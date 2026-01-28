@@ -96,13 +96,13 @@ impl Context {
     }
     
     /// Get query parameter by name
-    /// 
+    ///
     /// # Arguments
     /// * `name` - Query parameter name
-    /// 
+    ///
     /// # Returns
     /// Parameter value or nil if not found
-    /// 
+    ///
     /// # Example
     /// ```nv
     /// // URL: /users?page=2&limit=10
@@ -111,7 +111,26 @@ impl Context {
     pub fn query(self, name: string): string? {
         return self.request.query(name);
     }
-    
+
+    /// Get query parameter with default value
+    ///
+    /// # Arguments
+    /// * `name` - Query parameter name
+    /// * `default` - Default value if parameter not found
+    ///
+    /// # Returns
+    /// Parameter value or default if not found
+    ///
+    /// # Example
+    /// ```nv
+    /// // URL: /users?page=2
+    /// let page = ctx.default_query("page", "1");  // Returns "2"
+    /// let limit = ctx.default_query("limit", "10");  // Returns "10" (not in URL)
+    /// ```
+    pub fn default_query(self, name: string, default: string): string {
+        return self.query(name) || default;
+    }
+
     /// Get request header by name
     pub fn header(self, name: string): string? {
         return self.request.header(name);
@@ -216,7 +235,41 @@ impl Context {
         self.response.content_type("text/html; charset=utf-8");
         self.response.write(content);
     }
-    
+
+    /// Send XML response
+    ///
+    /// # Arguments
+    /// * `data` - Data to encode as XML
+    ///
+    /// # Example
+    /// ```nv
+    /// ctx.xml("<user><name>Alice</name></user>");
+    /// ```
+    ///
+    /// Note: Currently accepts pre-formatted XML string.
+    /// Full struct-to-XML serialization pending Navi XML encoder support.
+    pub fn xml(self, xml_string: string) {
+        self.response.content_type("application/xml; charset=utf-8");
+        self.response.write(xml_string);
+    }
+
+    /// Send YAML response
+    ///
+    /// # Arguments
+    /// * `data` - Data to encode as YAML
+    ///
+    /// # Example
+    /// ```nv
+    /// ctx.yaml("name: Alice\nage: 30\n");
+    /// ```
+    ///
+    /// Note: Currently accepts pre-formatted YAML string.
+    /// Full struct-to-YAML serialization pending Navi YAML encoder support.
+    pub fn yaml(self, yaml_string: string) {
+        self.response.content_type("application/yaml; charset=utf-8");
+        self.response.write(yaml_string);
+    }
+
     /// Send raw bytes
     pub fn data(self, content_type: string, data: string) {
         self.response.content_type(content_type);
@@ -329,6 +382,24 @@ impl Context {
         let value = self.keys.get(key);
         if (let v = value) {
             return v as int;
+        }
+        return nil;
+    }
+
+    /// Get a bool value from context
+    pub fn get_bool(self, key: string): bool? {
+        let value = self.keys.get(key);
+        if (let v = value) {
+            return v as bool;
+        }
+        return nil;
+    }
+
+    /// Get a float value from context
+    pub fn get_float(self, key: string): float? {
+        let value = self.keys.get(key);
+        if (let v = value) {
+            return v as float;
         }
         return nil;
     }
