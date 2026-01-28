@@ -26,13 +26,13 @@ pub struct WorkerPool {
     workers: [Worker],
 
     /// Task submission channel
-    task_ch: channel::<WorkerTask>,
+    task_ch: channel<WorkerTask>,
 
     /// Result channel
-    result_ch: channel::<WorkerResponse>,
+    result_ch: channel<WorkerResponse>,
 
     /// Shutdown signal
-    shutdown_ch: channel::<bool>,
+    shutdown_ch: channel<bool>,
 }
 
 impl WorkerPool {
@@ -85,9 +85,9 @@ impl WorkerPool {
     /// * `shutdown_ch` - Shutdown signal channel
     fn worker_loop(
         worker: Worker,
-        task_ch: channel::<WorkerTask>,
-        result_ch: channel::<WorkerResponse>,
-        shutdown_ch: channel::<bool>
+        task_ch: channel<WorkerTask>,
+        result_ch: channel<WorkerResponse>,
+        shutdown_ch: channel<bool>
     ) {
         while (true) {
             // Check for shutdown

@@ -10,7 +10,7 @@ use context.Context;
 
 /// Helper: Start server in background and return port
 fn start_test_server(handler: |(ctx: Context)|): int throws {
-    let app = Engine.default();
+    let app = Engine.with_defaults();
     app.get("/test", handler);
 
     // Find available port (simplified - use fixed port for now)
@@ -212,7 +212,7 @@ test "handle 404 not found" {
 }
 
 test "handle malformed request" {
-    let app = Engine.default();
+    let app = Engine.with_defaults();
     let port = 8889;
 
     spawn {

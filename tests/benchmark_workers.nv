@@ -34,7 +34,7 @@ fn fibonacci(n: int): int {
 
 /// Run benchmark for given number of concurrent requests
 fn benchmark_mode(use_worker_pool: bool, num_requests: int): float throws {
-    let config = Config.default();
+    let config = Config.with_defaults();
     if (!use_worker_pool) {
         config.with_worker_pool(false);
     }

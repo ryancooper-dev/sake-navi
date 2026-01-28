@@ -26,7 +26,7 @@ pub struct LoggerConfig {
 
 impl LoggerConfig {
     /// Create default logger configuration
-    pub fn default(): LoggerConfig {
+    pub fn with_defaults(): LoggerConfig {
         return LoggerConfig {
             use_colors: true,
             log_requests: true,
@@ -52,14 +52,14 @@ impl LoggerConfig {
 /// app.use(logger());
 /// ```
 pub fn logger(): HandlerFunc {
-    return logger_with_config(LoggerConfig.default());
+    return logger_with_config(LoggerConfig.with_defaults());
 }
 
 /// Create logger middleware with custom configuration
 ///
 /// # Example
 /// ```nv
-/// let config = LoggerConfig.default().without_colors();
+/// let config = LoggerConfig.with_defaults().without_colors();
 /// app.use(logger_with_config(config));
 /// ```
 pub fn logger_with_config(config: LoggerConfig): HandlerFunc {
@@ -145,7 +145,7 @@ test "logger middleware logs request" {
 }
 
 test "logger config without colors" {
-    let config = LoggerConfig.default().without_colors();
+    let config = LoggerConfig.with_defaults().without_colors();
 
     assert_eq config.use_colors, false;
     assert_eq config.log_requests, true;

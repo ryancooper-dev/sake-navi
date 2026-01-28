@@ -23,7 +23,7 @@ fn factorial(n: int): int {
 }
 
 fn main() throws {
-    let config = Config.default()
+    let config = Config.with_defaults()
         .with_worker_pool_size(0);  // Auto-detect CPU count
 
     let app = Engine.new(config);

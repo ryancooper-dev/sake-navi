@@ -5,7 +5,7 @@
 use sake.Engine;
 
 fn main() throws {
-    let app = Engine.default();
+    let app = Engine.with_defaults();
 
     // Simple text response
     app.get("/", |ctx| {

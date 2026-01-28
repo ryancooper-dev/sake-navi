@@ -13,14 +13,14 @@ use engine.Engine;
 // ============================================
 
 test "custom worker pool size" {
-    let config = Config.default().with_worker_pool_size(8);
+    let config = Config.with_defaults().with_worker_pool_size(8);
 
     assert_eq config.worker_pool_size, 8;
     assert_eq config.effective_worker_pool_size(), 8;
 }
 
 test "worker pool size is respected by engine" {
-    let config = Config.default().with_worker_pool_size(2);
+    let config = Config.with_defaults().with_worker_pool_size(2);
     let app = Engine.new(config);
 
     assert_eq app.config.worker_pool_size, 2;
@@ -32,7 +32,7 @@ test "worker pool size is respected by engine" {
 // ============================================
 
 test "auto detect worker pool size" {
-    let config = Config.default();
+    let config = Config.with_defaults();
 
     assert_eq config.worker_pool_size, 0;
 
@@ -44,7 +44,7 @@ test "auto detect worker pool size" {
 }
 
 test "zero worker pool size means auto" {
-    let config = Config.default().with_worker_pool_size(0);
+    let config = Config.with_defaults().with_worker_pool_size(0);
 
     assert_eq config.worker_pool_size, 0;
     assert config.effective_worker_pool_size() > 0;
@@ -55,13 +55,13 @@ test "zero worker pool size means auto" {
 // ============================================
 
 test "disable worker pool" {
-    let config = Config.default().with_worker_pool(false);
+    let config = Config.with_defaults().with_worker_pool(false);
 
     assert_eq config.enable_worker_pool, false;
 }
 
 test "disabled worker pool does not initialize" {
-    let config = Config.default().with_worker_pool(false);
+    let config = Config.with_defaults().with_worker_pool(false);
     let app = Engine.new(config);
 
     assert_eq app.config.enable_worker_pool, false;
@@ -74,17 +74,17 @@ test "disabled worker pool does not initialize" {
 // ============================================
 
 test "default max connections" {
-    let config = Config.default();
+    let config = Config.with_defaults();
     assert_eq config.max_connections, 10000;
 }
 
 test "custom max connections" {
-    let config = Config.default().with_max_connections(500);
+    let config = Config.with_defaults().with_max_connections(500);
     assert_eq config.max_connections, 500;
 }
 
 test "validate max connections positive" {
-    let config = Config.default().with_max_connections(0);
+    let config = Config.with_defaults().with_max_connections(0);
     let result = try? config.validate();
     assert result == nil; // Should fail validation
 }
@@ -94,17 +94,17 @@ test "validate max connections positive" {
 // ============================================
 
 test "default request timeout" {
-    let config = Config.default();
+    let config = Config.with_defaults();
     assert_eq config.request_timeout, 30000;
 }
 
 test "custom request timeout" {
-    let config = Config.default().with_request_timeout(60000);
+    let config = Config.with_defaults().with_request_timeout(60000);
     assert_eq config.request_timeout, 60000;
 }
 
 test "zero timeout means no timeout" {
-    let config = Config.default().with_request_timeout(0);
+    let config = Config.with_defaults().with_request_timeout(0);
     assert_eq config.request_timeout, 0;
 
     let result = try? config.validate();
@@ -112,7 +112,7 @@ test "zero timeout means no timeout" {
 }
 
 test "validate negative timeout" {
-    let config = Config.default().with_request_timeout(-1);
+    let config = Config.with_defaults().with_request_timeout(-1);
     let result = try? config.validate();
     assert result == nil; // Should fail validation
 }
@@ -122,7 +122,7 @@ test "validate negative timeout" {
 // ============================================
 
 test "builder pattern chains correctly" {
-    let config = Config.default()
+    let config = Config.with_defaults()
         .with_worker_pool_size(4)
         .with_worker_pool(true)
         .with_max_connections(1000)
@@ -138,7 +138,7 @@ test "builder pattern chains correctly" {
 }
 
 test "high performance configuration" {
-    let config = Config.default()
+    let config = Config.with_defaults()
         .with_worker_pool_size(16)
         .with_max_connections(50000)
         .with_request_timeout(10000);
@@ -151,7 +151,7 @@ test "high performance configuration" {
 }
 
 test "minimal configuration" {
-    let config = Config.default()
+    let config = Config.with_defaults()
         .with_worker_pool(false)
         .with_max_connections(100)
         .with_request_timeout(5000);
@@ -168,21 +168,21 @@ test "minimal configuration" {
 // ============================================
 
 test "valid configuration passes validation" {
-    let config = Config.default();
+    let config = Config.with_defaults();
     let result = try? config.validate();
     assert result == nil; // No error means validation passed
 }
 
 test "all valid configurations pass" {
     let configs = [
-        Config.default(),
-        Config.default().with_worker_pool_size(1),
-        Config.default().with_worker_pool_size(16),
-        Config.default().with_worker_pool(false),
-        Config.default().with_max_connections(1),
-        Config.default().with_max_connections(100000),
-        Config.default().with_request_timeout(0),
-        Config.default().with_request_timeout(300000),
+        Config.with_defaults(),
+        Config.with_defaults().with_worker_pool_size(1),
+        Config.with_defaults().with_worker_pool_size(16),
+        Config.with_defaults().with_worker_pool(false),
+        Config.with_defaults().with_max_connections(1),
+        Config.with_defaults().with_max_connections(100000),
+        Config.with_defaults().with_request_timeout(0),
+        Config.with_defaults().with_request_timeout(300000),
     ];
 
     for (let config in configs) {

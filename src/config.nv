@@ -5,7 +5,7 @@
 ///
 /// # Example
 /// ```nv
-/// let config = Config.default()
+/// let config = Config.with_defaults()
 ///     .with_worker_pool_size(4)
 ///     .with_max_connections(1000);
 /// ```
@@ -43,7 +43,7 @@ impl Config {
     /// - enable_worker_pool: true
     /// - max_connections: 10000
     /// - request_timeout: 30000ms (30s)
-    pub fn default(): Config {
+    pub fn with_defaults(): Config {
         return Config {};
     }
 
@@ -133,7 +133,7 @@ impl Config {
 // ============================================
 
 test "default config values" {
-    let config = Config.default();
+    let config = Config.with_defaults();
 
     assert_eq config.worker_pool_size, 0;
     assert_eq config.enable_worker_pool, true;
@@ -142,7 +142,7 @@ test "default config values" {
 }
 
 test "builder pattern" {
-    let config = Config.default()
+    let config = Config.with_defaults()
         .with_worker_pool_size(4)
         .with_max_connections(1000)
         .with_request_timeout(60000);
@@ -153,42 +153,42 @@ test "builder pattern" {
 }
 
 test "validate valid config" {
-    let config = Config.default();
+    let config = Config.with_defaults();
     let result = try? config.validate();
     assert result == nil;
 }
 
 test "validate negative worker_pool_size" {
-    let config = Config.default().with_worker_pool_size(-1);
+    let config = Config.with_defaults().with_worker_pool_size(-1);
     let result = try? config.validate();
     assert result == nil;
 }
 
 test "validate zero or negative max_connections" {
-    let config = Config.default().with_max_connections(0);
+    let config = Config.with_defaults().with_max_connections(0);
     let result = try? config.validate();
     assert result == nil;
 }
 
 test "validate negative request_timeout" {
-    let config = Config.default().with_request_timeout(-1);
+    let config = Config.with_defaults().with_request_timeout(-1);
     let result = try? config.validate();
     assert result == nil;
 }
 
 test "effective_worker_pool_size with explicit value" {
-    let config = Config.default().with_worker_pool_size(8);
+    let config = Config.with_defaults().with_worker_pool_size(8);
     assert_eq config.effective_worker_pool_size(), 8;
 }
 
 test "effective_worker_pool_size with auto-detect" {
-    let config = Config.default();
+    let config = Config.with_defaults();
     let size = config.effective_worker_pool_size();
     // Should return vm.num_cpus(), which is at least 1
     assert size > 0;
 }
 
 test "disable worker pool" {
-    let config = Config.default().with_worker_pool(false);
+    let config = Config.with_defaults().with_worker_pool(false);
     assert_eq config.enable_worker_pool, false;
 }

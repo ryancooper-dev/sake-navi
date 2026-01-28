@@ -16,7 +16,7 @@ pub struct RecoveryConfig {
 
 impl RecoveryConfig {
     /// Create default recovery configuration
-    pub fn default(): RecoveryConfig {
+    pub fn with_defaults(): RecoveryConfig {
         return RecoveryConfig {
             print_stack: true,
             include_details: false,
@@ -45,14 +45,14 @@ impl RecoveryConfig {
 /// app.use(recovery());
 /// ```
 pub fn recovery(): HandlerFunc {
-    return recovery_with_config(RecoveryConfig.default());
+    return recovery_with_config(RecoveryConfig.with_defaults());
 }
 
 /// Create recovery middleware with custom configuration
 ///
 /// # Example
 /// ```nv
-/// let config = RecoveryConfig.default().with_details();
+/// let config = RecoveryConfig.with_defaults().with_details();
 /// app.use(recovery_with_config(config));
 /// ```
 pub fn recovery_with_config(config: RecoveryConfig): HandlerFunc {
@@ -116,14 +116,14 @@ test "recovery allows successful requests" {
 }
 
 test "recovery config with details" {
-    let config = RecoveryConfig.default().with_details();
+    let config = RecoveryConfig.with_defaults().with_details();
 
     assert_eq config.include_details, true;
     assert_eq config.print_stack, true;
 }
 
 test "recovery config without stack" {
-    let config = RecoveryConfig.default().without_stack();
+    let config = RecoveryConfig.with_defaults().without_stack();
 
     assert_eq config.print_stack, false;
 }
@@ -135,7 +135,7 @@ test "recovery includes details when configured" {
         throw "Custom error message";
     };
 
-    let config = RecoveryConfig.default().with_details();
+    let config = RecoveryConfig.with_defaults().with_details();
     let ctx = Context.with_handlers(request, [recovery_with_config(config), failing_handler], {:});
     try! ctx.next();
 

@@ -7,19 +7,19 @@ use sake.Config;
 
 fn main() throws {
     // Option 1: High-throughput server
-    let high_throughput = Config.default()
+    let high_throughput = Config.with_defaults()
         .with_worker_pool_size(16)          // 16 worker threads
         .with_max_connections(50000)        // Handle 50k connections
         .with_request_timeout(10000);       // 10 second timeout
 
     // Option 2: Resource-constrained environment
-    let minimal = Config.default()
+    let minimal = Config.with_defaults()
         .with_worker_pool(false)            // Disable worker pool
         .with_max_connections(100)          // Limit to 100 connections
         .with_request_timeout(5000);        // 5 second timeout
 
     // Option 3: Balanced configuration (default)
-    let balanced = Config.default();        // Auto-detect optimal settings
+    let balanced = Config.with_defaults();        // Auto-detect optimal settings
 
     // Choose configuration based on environment
     let env = "development";  // or "production", "minimal"

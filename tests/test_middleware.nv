@@ -33,7 +33,7 @@ test "logger middleware executes handler" {
 }
 
 test "logger config without colors" {
-    let config = LoggerConfig.default().without_colors();
+    let config = LoggerConfig.with_defaults().without_colors();
 
     assert_eq config.use_colors, false;
 }
@@ -95,7 +95,7 @@ test "recovery with error details" {
         throw "Custom error message";
     };
 
-    let config = RecoveryConfig.default().with_details();
+    let config = RecoveryConfig.with_defaults().with_details();
     let ctx = Context.with_handlers(request, [recovery_with_config(config), failing_handler], {:});
     try! ctx.next();
 
@@ -104,7 +104,7 @@ test "recovery with error details" {
 }
 
 test "recovery without stack trace" {
-    let config = RecoveryConfig.default().without_stack();
+    let config = RecoveryConfig.with_defaults().without_stack();
 
     assert_eq config.print_stack, false;
 }
@@ -147,7 +147,7 @@ test "cors handles preflight OPTIONS request" {
 }
 
 test "cors with specific origins" {
-    let config = CorsConfig.default()
+    let config = CorsConfig.with_defaults()
         .with_origins(["https://example.com", "https://test.com"]);
 
     let request = try! Request.parse("GET /test HTTP/1.1\r\nOrigin: https://example.com\r\n\r\n");
@@ -161,7 +161,7 @@ test "cors with specific origins" {
 }
 
 test "cors with credentials" {
-    let config = CorsConfig.default().with_credentials();
+    let config = CorsConfig.with_defaults().with_credentials();
 
     let request = try! Request.parse("GET /test HTTP/1.1\r\nOrigin: https://example.com\r\n\r\n");
     let handler = |ctx| { ctx.string("OK"); };
@@ -174,7 +174,7 @@ test "cors with credentials" {
 }
 
 test "cors with exposed headers" {
-    let config = CorsConfig.default()
+    let config = CorsConfig.with_defaults()
         .with_exposed_headers(["X-Custom-Header", "X-Another-Header"]);
 
     let request = try! Request.parse("GET /test HTTP/1.1\r\nOrigin: https://example.com\r\n\r\n");
@@ -188,7 +188,7 @@ test "cors with exposed headers" {
 }
 
 test "cors with custom max age" {
-    let config = CorsConfig.default().with_max_age(7200);
+    let config = CorsConfig.with_defaults().with_max_age(7200);
 
     assert_eq config.max_age, 7200;
 }

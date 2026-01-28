@@ -30,7 +30,7 @@ impl CorsConfig {
     /// Create default CORS configuration
     ///
     /// Allows all origins, common methods and headers.
-    pub fn default(): CorsConfig {
+    pub fn with_defaults(): CorsConfig {
         return CorsConfig {
             allowed_origins: ["*"],
             allowed_methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
@@ -85,14 +85,14 @@ impl CorsConfig {
 /// app.use(cors());
 /// ```
 pub fn cors(): HandlerFunc {
-    return cors_with_config(CorsConfig.default());
+    return cors_with_config(CorsConfig.with_defaults());
 }
 
 /// Create CORS middleware with custom configuration
 ///
 /// # Example
 /// ```nv
-/// let config = CorsConfig.default()
+/// let config = CorsConfig.with_defaults()
 ///     .with_origins(["https://example.com"])
 ///     .with_credentials();
 /// app.use(cors_with_config(config));
@@ -193,7 +193,7 @@ test "cors handles preflight request" {
 }
 
 test "cors config with specific origins" {
-    let config = CorsConfig.default()
+    let config = CorsConfig.with_defaults()
         .with_origins(["https://example.com", "https://test.com"]);
 
     assert_eq config.allowed_origins.len(), 2;
@@ -201,7 +201,7 @@ test "cors config with specific origins" {
 }
 
 test "cors config with credentials" {
-    let config = CorsConfig.default().with_credentials();
+    let config = CorsConfig.with_defaults().with_credentials();
 
     assert_eq config.allow_credentials, true;
 }
@@ -209,7 +209,7 @@ test "cors config with credentials" {
 test "cors allows specific origin" {
     let request = try! Request.parse("GET /test HTTP/1.1\r\nOrigin: https://example.com\r\n\r\n");
 
-    let config = CorsConfig.default().with_origins(["https://example.com"]);
+    let config = CorsConfig.with_defaults().with_origins(["https://example.com"]);
     let handler = |ctx| { ctx.string("OK"); };
 
     let ctx = Context.with_handlers(request, [cors_with_config(config), handler], {:});

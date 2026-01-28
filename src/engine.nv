@@ -10,7 +10,7 @@
 /// use sake.Config;
 ///
 /// fn main() throws {
-///     let config = Config.default();
+///     let config = Config.with_defaults();
 ///     let app = Engine.new(config);
 ///
 ///     app.get("/", |ctx| {
@@ -42,16 +42,16 @@ pub struct Engine {
     middleware: [HandlerFunc],
 
     /// Shutdown channel
-    shutdown_ch: channel::<bool>?,
+    shutdown_ch: channel<bool>?,
 
     /// Worker pool for CPU-intensive routes
     worker_pool: WorkerPool?,
 
     /// Connection counter channel (send +1 to increment, -1 to decrement)
-    conn_counter_ch: channel::<int>?,
+    conn_counter_ch: channel<int>?,
 
     /// Connection query channel (send unit, receive current count)
-    conn_query_ch: channel::<int>?,
+    conn_query_ch: channel<int>?,
 }
 
 impl Engine {
@@ -75,8 +75,8 @@ impl Engine {
     }
 
     /// Create a new Engine with default configuration
-    pub fn default(): Engine {
-        return Engine.new(Config.default());
+    pub fn with_defaults(): Engine {
+        return Engine.new(Config.with_defaults());
     }
 
     /// Register a GET route
@@ -490,19 +490,19 @@ impl Engine {
 // ============================================
 
 test "create engine with default config" {
-    let app = Engine.default();
+    let app = Engine.with_defaults();
     assert_eq app.config.worker_pool_size, 0;
     assert_eq app.config.enable_worker_pool, true;
 }
 
 test "create engine with custom config" {
-    let config = Config.default().with_worker_pool_size(4);
+    let config = Config.with_defaults().with_worker_pool_size(4);
     let app = Engine.new(config);
     assert_eq app.config.worker_pool_size, 4;
 }
 
 test "register GET route" {
-    let app = Engine.default();
+    let app = Engine.with_defaults();
     app.get("/test", |ctx| {
         ctx.string("test");
     });
@@ -512,7 +512,7 @@ test "register GET route" {
 }
 
 test "register multiple routes" {
-    let app = Engine.default();
+    let app = Engine.with_defaults();
 
     app.get("/", |ctx| { ctx.string("home"); });
     app.post("/users", |ctx| { ctx.string("create"); });
@@ -522,7 +522,7 @@ test "register multiple routes" {
 }
 
 test "add middleware" {
-    let app = Engine.default();
+    let app = Engine.with_defaults();
 
     app.use(|ctx| {
         try ctx.next();
@@ -536,7 +536,7 @@ test "add middleware" {
 }
 
 test "register OPTIONS route" {
-    let app = Engine.default();
+    let app = Engine.with_defaults();
     app.options("/api/users", |ctx| { ctx.string("options"); });
 
     assert_eq app.router.routes.len(), 1;
@@ -544,7 +544,7 @@ test "register OPTIONS route" {
 }
 
 test "register HEAD route" {
-    let app = Engine.default();
+    let app = Engine.with_defaults();
     app.head("/api/health", |ctx| { ctx.string("ok"); });
 
     assert_eq app.router.routes.len(), 1;
@@ -552,7 +552,7 @@ test "register HEAD route" {
 }
 
 test "register ANY route" {
-    let app = Engine.default();
+    let app = Engine.with_defaults();
     app.any("/ping", |ctx| { ctx.json({"pong": true}); });
 
     // ANY registers 7 methods: GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD
