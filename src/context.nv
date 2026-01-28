@@ -1,0 +1,394 @@
+/// Request Context
+/// 
+/// Context is the most important struct in navi-web. It provides a unified interface
+/// for accessing request data and building responses. Context is passed to every
+/// handler and middleware.
+/// 
+/// # Example
+/// ```nv
+/// fn handler(ctx: Context) {
+///     let id = ctx.param("id") || "0";
+///     let page = ctx.query("page") || "1";
+///     try? ctx.json({"id": id, "page": page});
+/// }
+/// ```
+
+use request.Request;
+use response.Response;
+
+/// Handler function type
+/// All handlers and middleware use this signature
+pub type HandlerFunc = |(ctx: Context) throws|;
+
+/// Request context - the primary interface for handlers
+struct Context {
+    /// The incoming HTTP request
+    request: Request,
+    
+    /// The outgoing HTTP response
+    response: Response,
+    
+    /// Path parameters extracted from route (e.g., :id)
+    params: <string, string>,
+    
+    /// Handler chain (middleware + final handler)
+    handlers: [HandlerFunc],
+    
+    /// Current index in handler chain
+    index: int = -1,
+    
+    /// Key-value store for passing data between middleware
+    keys: <string, any>,
+    
+    /// Whether the handler chain was aborted
+    aborted: bool = false,
+}
+
+impl Context {
+    /// Create a new Context with request and response
+    pub fn new(request: Request, response: Response): Context {
+        return Context {
+            request,
+            response,
+            params: {:},
+            handlers: [],
+            keys: {:},
+        };
+    }
+    
+    /// Create context with handlers
+    pub fn with_handlers(request: Request, handlers: [HandlerFunc], params: <string, string>): Context {
+        return Context {
+            request,
+            response: Response.new(),
+            params,
+            handlers,
+            keys: {:},
+        };
+    }
+    
+    // ============================================
+    // Request accessors
+    // ============================================
+    
+    /// Get path parameter by name
+    /// 
+    /// # Arguments
+    /// * `name` - Parameter name (without colon)
+    /// 
+    /// # Returns
+    /// Parameter value or nil if not found
+    /// 
+    /// # Example
+    /// ```nv
+    /// // Route: /users/:id
+    /// let id = ctx.param("id");  // "123" for /users/123
+    /// ```
+    pub fn param(self, name: string): string? {
+        return self.params.get(name);
+    }
+    
+    /// Get query parameter by name
+    /// 
+    /// # Arguments
+    /// * `name` - Query parameter name
+    /// 
+    /// # Returns
+    /// Parameter value or nil if not found
+    /// 
+    /// # Example
+    /// ```nv
+    /// // URL: /users?page=2&limit=10
+    /// let page = ctx.query("page") || "1";
+    /// ```
+    pub fn query(self, name: string): string? {
+        return self.request.query(name);
+    }
+    
+    /// Get request header by name
+    pub fn header(self, name: string): string? {
+        return self.request.header(name);
+    }
+    
+    /// Get request body as string
+    pub fn body(self): string {
+        return self.request.body;
+    }
+    
+    /// Get request method
+    pub fn method(self): string {
+        return self.request.method;
+    }
+    
+    /// Get request path
+    pub fn path(self): string {
+        return self.request.path;
+    }
+    
+    /// Get full request URI
+    pub fn uri(self): string {
+        return self.request.uri;
+    }
+    
+    /// Get Content-Type of request
+    pub fn content_type(self): string? {
+        return self.request.content_type();
+    }
+    
+    // ============================================
+    // Request body parsing
+    // ============================================
+    
+    /// Parse request body as JSON into type T
+    /// 
+    /// # Returns
+    /// Parsed value or throws on parse error
+    /// 
+    /// # Example
+    /// ```nv
+    /// struct CreateUser {
+    ///     name: string,
+    ///     email: string,
+    /// }
+    /// 
+    /// let user = try ctx.bind_json::<CreateUser>();
+    /// ```
+    pub fn bind_json(self): T throws {
+        let body = self.request.body;
+        if (body.len() == 0) {
+            throw "Empty request body";
+        }
+        return try json.decode::<T>(body);
+    }
+    
+    // ============================================
+    // Response helpers
+    // ============================================
+    
+    /// Set response status code
+    /// 
+    /// # Arguments
+    /// * `code` - HTTP status code
+    /// 
+    /// # Returns
+    /// Self for chaining
+    pub fn status(self, code: int): Context {
+        self.response.status(code);
+        return self;
+    }
+    
+    /// Set response header
+    pub fn set_header(self, name: string, value: string): Context {
+        self.response.header(name, value);
+        return self;
+    }
+    
+    /// Send JSON response
+    /// 
+    /// # Arguments
+    /// * `data` - Data to encode as JSON
+    /// 
+    /// # Example
+    /// ```nv
+    /// try ctx.json({"message": "Hello", "count": 42});
+    /// ```
+    pub fn json(self, data: any) throws {
+        let body = try json.encode(data);
+        self.response.content_type("application/json; charset=utf-8");
+        self.response.write(body);
+    }
+    
+    /// Send plain text response
+    pub fn string(self, content: string) {
+        self.response.content_type("text/plain; charset=utf-8");
+        self.response.write(content);
+    }
+    
+    /// Send HTML response
+    pub fn html(self, content: string) {
+        self.response.content_type("text/html; charset=utf-8");
+        self.response.write(content);
+    }
+    
+    /// Send raw bytes
+    pub fn data(self, content_type: string, data: string) {
+        self.response.content_type(content_type);
+        self.response.write(data);
+    }
+    
+    /// Redirect to another URL
+    pub fn redirect(self, code: int, url: string) {
+        self.response.status(code);
+        self.response.header("Location", url);
+    }
+    
+    // ============================================
+    // Middleware control
+    // ============================================
+    
+    /// Execute the next handler in the chain
+    /// 
+    /// This is the core of middleware functionality. Calling next()
+    /// executes the next handler, and code after next() runs after
+    /// that handler returns.
+    /// 
+    /// # Example
+    /// ```nv
+    /// fn logger(): HandlerFunc {
+    ///     return |ctx| {
+    ///         let start = time.now();
+    ///         try ctx.next();  // Execute rest of chain
+    ///         let duration = time.now() - start;
+    ///         println(`Request took ${duration}ms`);
+    ///     };
+    /// }
+    /// ```
+    pub fn next(self) throws {
+        self.index += 1;
+        
+        while (self.index < self.handlers.len() && !self.aborted) {
+            let handler = self.handlers[self.index];
+            try handler(self);
+            self.index += 1;
+        }
+    }
+    
+    /// Abort the handler chain
+    /// 
+    /// Stops execution of remaining handlers. Usually used after
+    /// sending an error response.
+    pub fn abort(self) {
+        self.aborted = true;
+    }
+    
+    /// Abort with specific status code
+    pub fn abort_with_status(self, code: int) {
+        self.response.status(code);
+        self.abort();
+    }
+    
+    /// Abort with JSON error response
+    pub fn abort_with_error(self, code: int, message: string) {
+        self.response.status(code);
+        self.response.content_type("application/json");
+        self.response.write(`{"error": "${message}"}`);
+        self.abort();
+    }
+    
+    /// Check if chain was aborted
+    pub fn is_aborted(self): bool {
+        return self.aborted;
+    }
+    
+    // ============================================
+    // Middleware data passing
+    // ============================================
+    
+    /// Store a value in context for later retrieval
+    /// 
+    /// Useful for passing data between middleware.
+    /// 
+    /// # Example
+    /// ```nv
+    /// // In auth middleware
+    /// ctx.set("user_id", user.id);
+    /// 
+    /// // In handler
+    /// let user_id = ctx.get("user_id") as int;
+    /// ```
+    pub fn set(self, key: string, value: any) {
+        self.keys[key] = value;
+    }
+    
+    /// Get a value from context
+    /// 
+    /// # Returns
+    /// Stored value or nil if not found
+    pub fn get(self, key: string): any? {
+        return self.keys.get(key);
+    }
+    
+    /// Get a string value from context
+    pub fn get_string(self, key: string): string? {
+        let value = self.keys.get(key);
+        if (let v = value) {
+            return v as string;
+        }
+        return nil;
+    }
+    
+    /// Get an int value from context
+    pub fn get_int(self, key: string): int? {
+        let value = self.keys.get(key);
+        if (let v = value) {
+            return v as int;
+        }
+        return nil;
+    }
+}
+
+// ============================================
+// Tests
+// ============================================
+
+test "create context" {
+    let req = try! Request.parse("GET /test HTTP/1.1\r\nHost: localhost\r\n\r\n");
+    let ctx = Context.new(req, Response.new());
+    
+    assert_eq ctx.method(), "GET";
+    assert_eq ctx.path(), "/test";
+}
+
+test "access query params" {
+    let req = try! Request.parse("GET /test?page=2&limit=10 HTTP/1.1\r\nHost: localhost\r\n\r\n");
+    let ctx = Context.new(req, Response.new());
+    
+    assert_eq ctx.query("page"), "2";
+    assert_eq ctx.query("limit"), "10";
+    assert_eq ctx.query("missing"), nil;
+}
+
+test "set and get context values" {
+    let req = try! Request.parse("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n");
+    let ctx = Context.new(req, Response.new());
+    
+    ctx.set("user_id", 123);
+    ctx.set("role", "admin");
+    
+    assert_eq ctx.get_int("user_id"), 123;
+    assert_eq ctx.get_string("role"), "admin";
+    assert_eq ctx.get("missing"), nil;
+}
+
+test "response helpers" {
+    let req = try! Request.parse("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n");
+    let ctx = Context.new(req, Response.new());
+    
+    ctx.status(201).set_header("X-Custom", "value");
+    ctx.string("Created");
+    
+    assert_eq ctx.response.status_code, 201;
+    assert_eq ctx.response.get_header("X-Custom"), "value";
+    assert ctx.response.body.contains("Created");
+}
+
+test "abort chain" {
+    let req = try! Request.parse("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n");
+    let ctx = Context.new(req, Response.new());
+    
+    assert_eq ctx.is_aborted(), false;
+    
+    ctx.abort_with_status(401);
+    
+    assert_eq ctx.is_aborted(), true;
+    assert_eq ctx.response.status_code, 401;
+}
+
+test "path params" {
+    let req = try! Request.parse("GET /users/123 HTTP/1.1\r\nHost: localhost\r\n\r\n");
+    let params: <string, string> = {"id": "123"};
+    let ctx = Context.with_handlers(req, [], params);
+    
+    assert_eq ctx.param("id"), "123";
+    assert_eq ctx.param("missing"), nil;
+}

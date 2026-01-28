@@ -1,0 +1,290 @@
+/// HTTP Response builder
+/// 
+/// Builds HTTP responses with status code, headers, and body.
+/// 
+/// # Example
+/// ```nv
+/// let resp = Response.new();
+/// resp.status(200);
+/// resp.header("Content-Type", "application/json");
+/// resp.write("{\"message\": \"ok\"}");
+/// let http_response = resp.build();
+/// ```
+
+use std.io.{Writer};
+
+/// HTTP status code descriptions
+let STATUS_TEXTS: <int, string> = {
+    200: "OK",
+    201: "Created",
+    204: "No Content",
+    301: "Moved Permanently",
+    302: "Found",
+    304: "Not Modified",
+    400: "Bad Request",
+    401: "Unauthorized",
+    403: "Forbidden",
+    404: "Not Found",
+    405: "Method Not Allowed",
+    409: "Conflict",
+    422: "Unprocessable Entity",
+    500: "Internal Server Error",
+    502: "Bad Gateway",
+    503: "Service Unavailable",
+};
+
+/// HTTP Response struct
+struct Response {
+    /// HTTP status code (default: 200)
+    status_code: int = 200,
+    
+    /// Response headers
+    headers: <string, string>,
+    
+    /// Response body
+    body: string = "",
+    
+    /// Whether headers have been sent
+    headers_sent: bool = false,
+}
+
+impl Response {
+    /// Create a new empty Response
+    pub fn new(): Response {
+        return Response {
+            headers: {:},
+        };
+    }
+    
+    /// Set the HTTP status code
+    /// 
+    /// # Arguments
+    /// * `code` - HTTP status code (e.g., 200, 404, 500)
+    /// 
+    /// # Returns
+    /// Self for chaining
+    pub fn status(self, code: int): Response {
+        self.status_code = code;
+        return self;
+    }
+    
+    /// Set a response header
+    /// 
+    /// # Arguments
+    /// * `name` - Header name
+    /// * `value` - Header value
+    /// 
+    /// # Returns
+    /// Self for chaining
+    pub fn header(self, name: string, value: string): Response {
+        self.headers[name] = value;
+        return self;
+    }
+    
+    /// Get a response header value
+    /// 
+    /// # Arguments
+    /// * `name` - Header name
+    /// 
+    /// # Returns
+    /// Header value or nil if not set
+    pub fn get_header(self, name: string): string? {
+        return self.headers.get(name);
+    }
+    
+    /// Set Content-Type header
+    pub fn content_type(self, mime: string): Response {
+        return self.header("Content-Type", mime);
+    }
+    
+    /// Write content to the response body
+    /// 
+    /// # Arguments
+    /// * `content` - Content to append to body
+    pub fn write(self, content: string) {
+        self.body = self.body + content;
+    }
+    
+    /// Clear the response body
+    pub fn clear_body(self) {
+        self.body = "";
+    }
+    
+    /// Build the complete HTTP response string
+    /// 
+    /// # Returns
+    /// Full HTTP response ready to send over the wire
+    pub fn build(self): string {
+        let status_text = STATUS_TEXTS.get(self.status_code) || "Unknown";
+        
+        // Start with status line
+        let result = `HTTP/1.1 ${self.status_code} ${status_text}\r\n`;
+        
+        // Add Content-Length if not set
+        if (self.headers.get("Content-Length") == nil) {
+            self.headers["Content-Length"] = self.body.len().to_string();
+        }
+        
+        // Add default headers if not set
+        if (self.headers.get("Connection") == nil) {
+            self.headers["Connection"] = "close";
+        }
+        
+        // Add headers
+        for (let name, value in self.headers) {
+            result = result + `${name}: ${value}\r\n`;
+        }
+        
+        // Empty line before body
+        result = result + "\r\n";
+        
+        // Add body
+        result = result + self.body;
+        
+        return result;
+    }
+    
+    /// Send response to a writer
+    /// 
+    /// # Arguments
+    /// * `writer` - Writer to send response to
+    pub fn send(self, writer: Writer) throws {
+        let data = self.build();
+        try writer.write(data.as_bytes());
+        try writer.flush();
+        self.headers_sent = true;
+    }
+    
+    /// Check if response was already sent
+    pub fn is_sent(self): bool {
+        return self.headers_sent;
+    }
+}
+
+/// Response builder helpers
+impl Response {
+    /// Create a 200 OK response with JSON content
+    pub fn json_ok(data: string): Response {
+        return Response.new()
+            .status(200)
+            .content_type("application/json")
+            .with_body(data);
+    }
+    
+    /// Create a 201 Created response
+    pub fn created(data: string): Response {
+        return Response.new()
+            .status(201)
+            .content_type("application/json")
+            .with_body(data);
+    }
+    
+    /// Create a 204 No Content response
+    pub fn no_content(): Response {
+        return Response.new().status(204);
+    }
+    
+    /// Create a 400 Bad Request response
+    pub fn bad_request(message: string): Response {
+        return Response.new()
+            .status(400)
+            .content_type("application/json")
+            .with_body(`{"error": "${message}"}`);
+    }
+    
+    /// Create a 401 Unauthorized response
+    pub fn unauthorized(): Response {
+        return Response.new()
+            .status(401)
+            .content_type("application/json")
+            .with_body("{\"error\": \"Unauthorized\"}");
+    }
+    
+    /// Create a 404 Not Found response
+    pub fn not_found(): Response {
+        return Response.new()
+            .status(404)
+            .content_type("application/json")
+            .with_body("{\"error\": \"Not Found\"}");
+    }
+    
+    /// Create a 500 Internal Server Error response
+    pub fn internal_error(message: string): Response {
+        return Response.new()
+            .status(500)
+            .content_type("application/json")
+            .with_body(`{"error": "${message}"}`);
+    }
+    
+    /// Helper to set body and return self
+    fn with_body(self, content: string): Response {
+        self.body = content;
+        return self;
+    }
+}
+
+// ============================================
+// Tests
+// ============================================
+
+test "create empty response" {
+    let resp = Response.new();
+    assert_eq resp.status_code, 200;
+    assert_eq resp.body, "";
+}
+
+test "set status and headers" {
+    let resp = Response.new()
+        .status(201)
+        .header("X-Custom", "value")
+        .content_type("application/json");
+    
+    assert_eq resp.status_code, 201;
+    assert_eq resp.get_header("X-Custom"), "value";
+    assert_eq resp.get_header("Content-Type"), "application/json";
+}
+
+test "write body" {
+    let resp = Response.new();
+    resp.write("Hello ");
+    resp.write("World");
+    
+    assert_eq resp.body, "Hello World";
+}
+
+test "build HTTP response" {
+    let resp = Response.new()
+        .status(200)
+        .content_type("text/plain");
+    resp.write("OK");
+    
+    let result = resp.build();
+    
+    assert result.contains("HTTP/1.1 200 OK");
+    assert result.contains("Content-Type: text/plain");
+    assert result.contains("Content-Length: 2");
+    assert result.contains("\r\n\r\nOK");
+}
+
+test "json_ok helper" {
+    let resp = Response.json_ok("{\"status\": \"ok\"}");
+    
+    assert_eq resp.status_code, 200;
+    assert_eq resp.get_header("Content-Type"), "application/json";
+    assert_eq resp.body, "{\"status\": \"ok\"}";
+}
+
+test "not_found helper" {
+    let resp = Response.not_found();
+    
+    assert_eq resp.status_code, 404;
+    assert resp.body.contains("Not Found");
+}
+
+test "build includes content length" {
+    let resp = Response.new();
+    resp.write("test body");
+    let result = resp.build();
+    
+    assert result.contains("Content-Length: 9");
+}

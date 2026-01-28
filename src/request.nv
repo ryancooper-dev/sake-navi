@@ -1,0 +1,250 @@
+/// HTTP Request representation
+/// 
+/// Parses and holds HTTP request data including method, path, headers, query parameters, and body.
+/// 
+/// # Example
+/// ```nv
+/// let raw = "GET /users?page=1 HTTP/1.1\r\nHost: localhost\r\n\r\n";
+/// let request = try Request.parse(raw);
+/// assert_eq request.method, "GET";
+/// assert_eq request.path, "/users";
+/// assert_eq request.query("page"), "1";
+/// ```
+
+/// HTTP Request struct
+struct Request {
+    /// HTTP method (GET, POST, PUT, DELETE, etc.)
+    method: string,
+    
+    /// Request path without query string (e.g., "/users/123")
+    path: string,
+    
+    /// Full URI including query string (e.g., "/users/123?active=true")
+    uri: string,
+    
+    /// HTTP headers as key-value map
+    headers: <string, string>,
+    
+    /// Query parameters parsed from URI
+    query_params: <string, string>,
+    
+    /// Request body (for POST, PUT, etc.)
+    body: string,
+    
+    /// HTTP version (e.g., "HTTP/1.1")
+    version: string,
+}
+
+impl Request {
+    /// Parse raw HTTP request string into Request struct
+    /// 
+    /// # Arguments
+    /// * `raw` - Raw HTTP request string
+    /// 
+    /// # Returns
+    /// Parsed Request or throws on parse error
+    /// 
+    /// # Errors
+    /// Throws if request line is malformed
+    pub fn parse(raw: string): Request throws {
+        let lines = raw.split("\r\n");
+        
+        if (lines.len() == 0) {
+            throw "Empty request";
+        }
+        
+        // Parse request line: "GET /path HTTP/1.1"
+        let request_line = lines[0];
+        let parts = request_line.split(" ");
+        
+        if (parts.len() < 3) {
+            throw "Malformed request line";
+        }
+        
+        let method = parts[0].to_uppercase();
+        let uri = parts[1];
+        let version = parts[2];
+        
+        // Parse path and query string
+        let path = uri;
+        let query_params: <string, string> = {:};
+        
+        let query_idx = uri.find("?");
+        if (let idx = query_idx) {
+            path = uri.substring(0, idx);
+            let query_str = uri.substring(idx + 1, uri.len());
+            query_params = Request.parse_query_string(query_str);
+        }
+        
+        // Parse headers
+        let headers: <string, string> = {:};
+        let body_start = 0;
+        
+        for (let i in 1..lines.len()) {
+            let line = lines[i];
+            
+            // Empty line marks end of headers
+            if (line.len() == 0) {
+                body_start = i + 1;
+                break;
+            }
+            
+            let colon_idx = line.find(":");
+            if (let idx = colon_idx) {
+                let key = line.substring(0, idx).trim().to_lowercase();
+                let value = line.substring(idx + 1, line.len()).trim();
+                headers[key] = value;
+            }
+        }
+        
+        // Parse body
+        let body = "";
+        if (body_start > 0 && body_start < lines.len()) {
+            let body_parts: [string] = [];
+            for (let i in body_start..lines.len()) {
+                body_parts.push(lines[i]);
+            }
+            body = body_parts.join("\r\n");
+        }
+        
+        return Request {
+            method,
+            path,
+            uri,
+            headers,
+            query_params,
+            body,
+            version,
+        };
+    }
+    
+    /// Parse query string into key-value map
+    /// 
+    /// # Arguments
+    /// * `query_str` - Query string without leading "?" (e.g., "page=1&limit=10")
+    fn parse_query_string(query_str: string): <string, string> {
+        let params: <string, string> = {:};
+        
+        if (query_str.len() == 0) {
+            return params;
+        }
+        
+        let pairs = query_str.split("&");
+        for (let pair in pairs) {
+            let eq_idx = pair.find("=");
+            if (let idx = eq_idx) {
+                let key = pair.substring(0, idx);
+                let value = pair.substring(idx + 1, pair.len());
+                // TODO: URL decode
+                params[key] = value;
+            } else {
+                // Key without value
+                params[pair] = "";
+            }
+        }
+        
+        return params;
+    }
+    
+    /// Get header value by name (case-insensitive)
+    /// 
+    /// # Arguments
+    /// * `name` - Header name
+    /// 
+    /// # Returns
+    /// Header value or nil if not found
+    pub fn header(self, name: string): string? {
+        return self.headers.get(name.to_lowercase());
+    }
+    
+    /// Get query parameter by name
+    /// 
+    /// # Arguments
+    /// * `name` - Parameter name
+    /// 
+    /// # Returns
+    /// Parameter value or nil if not found
+    pub fn query(self, name: string): string? {
+        return self.query_params.get(name);
+    }
+    
+    /// Get Content-Type header
+    pub fn content_type(self): string? {
+        return self.header("content-type");
+    }
+    
+    /// Get Content-Length as integer
+    pub fn content_length(self): int? {
+        let len_str = self.header("content-length");
+        if (let s = len_str) {
+            return try? s.parse::<int>();
+        }
+        return nil;
+    }
+    
+    /// Check if request method is GET
+    pub fn is_get(self): bool {
+        return self.method == "GET";
+    }
+    
+    /// Check if request method is POST
+    pub fn is_post(self): bool {
+        return self.method == "POST";
+    }
+    
+    /// Check if request expects JSON response
+    pub fn accepts_json(self): bool {
+        let accept = self.header("accept") || "";
+        return accept.contains("application/json") || accept.contains("*/*");
+    }
+}
+
+// ============================================
+// Tests
+// ============================================
+
+test "parse simple GET request" {
+    let raw = "GET /users HTTP/1.1\r\nHost: localhost\r\n\r\n";
+    let req = try! Request.parse(raw);
+    
+    assert_eq req.method, "GET";
+    assert_eq req.path, "/users";
+    assert_eq req.version, "HTTP/1.1";
+    assert_eq req.header("host"), "localhost";
+}
+
+test "parse GET with query params" {
+    let raw = "GET /users?page=1&limit=10 HTTP/1.1\r\nHost: localhost\r\n\r\n";
+    let req = try! Request.parse(raw);
+    
+    assert_eq req.path, "/users";
+    assert_eq req.query("page"), "1";
+    assert_eq req.query("limit"), "10";
+    assert_eq req.query("missing"), nil;
+}
+
+test "parse POST with body" {
+    let raw = "POST /users HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: 27\r\n\r\n{\"name\":\"John\",\"age\":30}";
+    let req = try! Request.parse(raw);
+    
+    assert_eq req.method, "POST";
+    assert_eq req.path, "/users";
+    assert_eq req.content_type(), "application/json";
+    assert_eq req.body, "{\"name\":\"John\",\"age\":30}";
+}
+
+test "parse headers case insensitive" {
+    let raw = "GET / HTTP/1.1\r\nContent-Type: text/html\r\nX-Custom-Header: value\r\n\r\n";
+    let req = try! Request.parse(raw);
+    
+    assert_eq req.header("content-type"), "text/html";
+    assert_eq req.header("CONTENT-TYPE"), "text/html";
+    assert_eq req.header("x-custom-header"), "value";
+}
+
+test "parse empty body" {
+    let raw = "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n";
+    let req = try! Request.parse(raw);
+    
+    assert_eq req.body, "";
+}

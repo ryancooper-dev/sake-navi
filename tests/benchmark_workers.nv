@@ -1,0 +1,63 @@
+// WorkerPool 性能基准测试
+// 运行: navi run benchmark_workers.nv
+
+use std.vm;
+use std.worker.Worker;
+use std.time;
+
+fn main() throws {
+    println("=== WorkerPool 性能基准测试 ===\n");
+    
+    let cpus = vm.num_cpus();
+    println(`CPU 核心数: ${cpus}\n`);
+    
+    // 测试数据
+    let data: [int] = [];
+    for (let i in 0..10000) {
+        data.push(i);
+    }
+    
+    // 基准: 单线程处理
+    println("1. 单线程基准");
+    let start = time.Instant.now();
+    let single_results: [int] = [];
+    for (let n in data) {
+        single_results.push(cpu_work(n));
+    }
+    let single_time = start.elapsed();
+    println(`   耗时: ${single_time}`);
+    
+    // 测试不同 Worker 数量
+    for (let workers in [1, 2, 4, 8]) {
+        if (workers > cpus) {
+            continue;
+        }
+        
+        println(`\n2. WorkerPool (${workers} workers)`);
+        let pool = try Worker.pool(|n: int| {
+            return cpu_work(n);
+        }, workers);
+        
+        let start = time.Instant.now();
+        let results = try pool.map_array(data);
+        let pool_time = start.elapsed();
+        
+        let speedup = single_time.as_secs_f64() / pool_time.as_secs_f64();
+        println(`   耗时: ${pool_time}`);
+        println(`   加速比: ${speedup:.2}x`);
+        
+        // 验证结果正确性
+        assert_eq results.len(), single_results.len();
+    }
+    
+    println("\n=== 测试完成 ===");
+}
+
+// 模拟 CPU 密集型工作
+fn cpu_work(n: int): int {
+    let result = n;
+    for (let i in 0..100) {
+        result = (result * 7 + 13) % 1000000;
+    }
+    return result;
+}

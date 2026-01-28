@@ -1,0 +1,15 @@
+// Test 2: Check if fork exists
+use std.process;
+
+fn main() throws {
+    let result = try? process.fork();
+    if (let pid = result) {
+        if (pid == 0) {
+            println("Child process");
+        } else {
+            println(`Parent, child PID: ${pid}`);
+        }
+    } else {
+        println("fork() not available or failed");
+    }
+}
