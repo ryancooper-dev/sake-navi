@@ -1,0 +1,145 @@
+/// Recovery middleware for panic recovery
+///
+/// Catches errors thrown during request handling and returns
+/// a 500 Internal Server Error response instead of crashing the server.
+
+use context.{Context, HandlerFunc};
+
+/// Recovery middleware configuration
+pub struct RecoveryConfig {
+    /// Whether to print stack traces
+    pub print_stack: bool = true,
+
+    /// Whether to include error details in response
+    pub include_details: bool = false,
+}
+
+impl RecoveryConfig {
+    /// Create default recovery configuration
+    pub fn default(): RecoveryConfig {
+        return RecoveryConfig {
+            print_stack: true,
+            include_details: false,
+        };
+    }
+
+    /// Enable error details in response (use only in development)
+    pub fn with_details(self): RecoveryConfig {
+        self.include_details = true;
+        return self;
+    }
+
+    /// Disable stack trace printing
+    pub fn without_stack(self): RecoveryConfig {
+        self.print_stack = false;
+        return self;
+    }
+}
+
+/// Create recovery middleware with default configuration
+///
+/// Catches panics and returns 500 error response.
+///
+/// # Example
+/// ```nv
+/// app.use(recovery());
+/// ```
+pub fn recovery(): HandlerFunc {
+    return recovery_with_config(RecoveryConfig.default());
+}
+
+/// Create recovery middleware with custom configuration
+///
+/// # Example
+/// ```nv
+/// let config = RecoveryConfig.default().with_details();
+/// app.use(recovery_with_config(config));
+/// ```
+pub fn recovery_with_config(config: RecoveryConfig): HandlerFunc {
+    return |ctx| {
+        // Try to execute handler chain
+        do {
+            try ctx.next();
+        } catch (e) {
+            // Log the error
+            if (config.print_stack) {
+                println("❌ PANIC RECOVERED:");
+                println(`   Error: ${e.error()}`);
+                println(`   Path: ${ctx.path()}`);
+                println(`   Method: ${ctx.method()}`);
+            }
+
+            // Return error response
+            if (config.include_details) {
+                ctx.abort_with_error(500, `Internal Server Error: ${e.error()}`);
+            } else {
+                ctx.abort_with_error(500, "Internal Server Error");
+            }
+        }
+    };
+}
+
+// ============================================
+// Tests
+// ============================================
+
+use request.Request;
+
+test "recovery catches errors" {
+    let request = try! Request.parse("GET /test HTTP/1.1\r\n\r\n");
+
+    let failing_handler = |ctx| {
+        throw "Something went wrong!";
+    };
+
+    let ctx = Context.with_handlers(request, [recovery(), failing_handler], {:});
+    try! ctx.next();
+
+    // Verify 500 status
+    let response_text = ctx.response.build();
+    assert response_text.contains("500");
+    assert response_text.contains("Internal Server Error");
+}
+
+test "recovery allows successful requests" {
+    let request = try! Request.parse("GET /test HTTP/1.1\r\n\r\n");
+
+    let working_handler = |ctx| {
+        ctx.string("OK");
+    };
+
+    let ctx = Context.with_handlers(request, [recovery(), working_handler], {:});
+    try! ctx.next();
+
+    // Verify success response
+    assert ctx.response.body.contains("OK");
+}
+
+test "recovery config with details" {
+    let config = RecoveryConfig.default().with_details();
+
+    assert_eq config.include_details, true;
+    assert_eq config.print_stack, true;
+}
+
+test "recovery config without stack" {
+    let config = RecoveryConfig.default().without_stack();
+
+    assert_eq config.print_stack, false;
+}
+
+test "recovery includes details when configured" {
+    let request = try! Request.parse("GET /test HTTP/1.1\r\n\r\n");
+
+    let failing_handler = |ctx| {
+        throw "Custom error message";
+    };
+
+    let config = RecoveryConfig.default().with_details();
+    let ctx = Context.with_handlers(request, [recovery_with_config(config), failing_handler], {:});
+    try! ctx.next();
+
+    // Verify error details included
+    let response_text = ctx.response.build();
+    assert response_text.contains("Custom error message");
+}

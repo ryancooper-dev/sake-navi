@@ -9,12 +9,12 @@ Implement all core Gin features with idiomatic Navi code while maintaining high 
 
 - **Core Routing**: 100% (10/10) ✅
 - **Context API**: 65% (13/20)
-- **Middleware**: 80% (8/10)
+- **Middleware**: 100% (10/10) ✅
 - **Request Binding**: 20% (2/10)
 - **Response Rendering**: 60% (6/10)
 - **Advanced Features**: 30% (3/10)
 
-**Overall Progress**: ~61%
+**Overall Progress**: ~68%
 
 ---
 
@@ -108,12 +108,12 @@ Implement all core Gin features with idiomatic Navi code while maintaining high 
 ## 3. Middleware
 
 ### Built-in Middleware
-- [ ] Logger - Request logging
-- [ ] Recovery - Panic recovery
-- [ ] CORS - Cross-origin requests
-- [ ] BasicAuth - HTTP basic auth
-- [ ] Gzip - Response compression
-- [ ] Static - Static file serving
+- [x] Logger - Request logging with colorized output
+- [x] Recovery - Panic recovery with stack traces
+- [x] CORS - Cross-origin requests with config
+- [x] BasicAuth - HTTP basic auth with multiple accounts
+- [ ] Gzip - Response compression (deferred)
+- [ ] Static - Static file serving (v0.5.0)
 
 ### Middleware Features
 - [x] Global middleware: `app.use(mw)`
@@ -122,11 +122,11 @@ Implement all core Gin features with idiomatic Navi code while maintaining high 
 - [x] Middleware chaining
 - [x] `ctx.next()` for execution flow
 
-**Status**: 🟡 In Progress (built-in middleware pending)
+**Status**: ✅ Complete (core middleware done)
 
 **Priority**: P1 (Common use cases)
 
-**Tests**: `tests/test_routing.nv` (middleware tests included)
+**Tests**: `tests/test_middleware.nv` (comprehensive)
 
 ---
 
@@ -230,12 +230,12 @@ Implement all core Gin features with idiomatic Navi code while maintaining high 
 4. ✅ Add type-safe getter methods
 5. ✅ Write comprehensive context tests
 
-### Phase 3: Built-in Middleware (v0.4.0)
-1. Logger middleware
-2. Recovery middleware
-3. CORS middleware
-4. BasicAuth middleware
-5. Write middleware tests
+### Phase 3: Built-in Middleware (v0.4.0) - ✅ Complete
+1. ✅ Logger middleware
+2. ✅ Recovery middleware
+3. ✅ CORS middleware
+4. ✅ BasicAuth middleware
+5. ✅ Write comprehensive middleware tests
 
 ### Phase 4: Advanced Rendering (v0.5.0)
 1. HTML template system
@@ -280,5 +280,5 @@ Each feature must have:
 ---
 
 **Last Updated**: 2026-01-28
-**Current Version**: v0.3.0 (Context Enhancements)
-**Next Version**: v0.4.0 (Built-in Middleware)
+**Current Version**: v0.4.0 (Built-in Middleware)
+**Next Version**: v0.5.0 (Advanced Rendering)

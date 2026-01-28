@@ -1,0 +1,226 @@
+/// BasicAuth middleware for HTTP Basic Authentication
+///
+/// Implements HTTP Basic Authentication by validating credentials
+/// from the Authorization header.
+
+use std.encoding.base64;
+use context.{Context, HandlerFunc};
+
+/// Account credentials
+pub struct Account {
+    /// Username
+    pub username: string,
+
+    /// Password
+    pub password: string,
+}
+
+impl Account {
+    /// Create new account
+    pub fn new(username: string, password: string): Account {
+        return Account { username, password };
+    }
+}
+
+/// BasicAuth middleware configuration
+pub struct BasicAuthConfig {
+    /// List of valid accounts
+    pub accounts: [Account],
+
+    /// Realm for authentication
+    pub realm: string = "Authorization Required",
+
+    /// Custom unauthorized response
+    pub unauthorized_message: string = "Unauthorized",
+}
+
+impl BasicAuthConfig {
+    /// Create configuration with accounts
+    pub fn with_accounts(accounts: [Account]): BasicAuthConfig {
+        return BasicAuthConfig {
+            accounts,
+            realm: "Authorization Required",
+            unauthorized_message: "Unauthorized",
+        };
+    }
+
+    /// Set realm
+    pub fn with_realm(self, realm: string): BasicAuthConfig {
+        self.realm = realm;
+        return self;
+    }
+
+    /// Set unauthorized message
+    pub fn with_message(self, message: string): BasicAuthConfig {
+        self.unauthorized_message = message;
+        return self;
+    }
+}
+
+/// Create BasicAuth middleware with accounts
+///
+/// # Arguments
+/// * `accounts` - Map of username to password
+///
+/// # Example
+/// ```nv
+/// let accounts = [
+///     Account.new("admin", "secret123"),
+///     Account.new("user", "password456"),
+/// ];
+/// app.use(basic_auth(accounts));
+/// ```
+pub fn basic_auth(accounts: [Account]): HandlerFunc {
+    let config = BasicAuthConfig.with_accounts(accounts);
+    return basic_auth_with_config(config);
+}
+
+/// Create BasicAuth middleware with custom configuration
+///
+/// # Example
+/// ```nv
+/// let config = BasicAuthConfig.with_accounts([
+///     Account.new("admin", "secret"),
+/// ]).with_realm("Admin Area");
+/// app.use(basic_auth_with_config(config));
+/// ```
+pub fn basic_auth_with_config(config: BasicAuthConfig): HandlerFunc {
+    return |ctx| {
+        // Get Authorization header
+        let auth_header = ctx.header("authorization");
+
+        if (let auth = auth_header) {
+            // Parse Basic auth header
+            if (auth.starts_with("Basic ")) {
+                let encoded = auth.substring(6, auth.len());
+
+                // Decode base64
+                let decoded_result = try? base64.decode(encoded);
+                if (let decoded = decoded_result) {
+                    // Parse username:password
+                    let parts = decoded.split(":");
+                    if (parts.len() == 2) {
+                        let username = parts[0];
+                        let password = parts[1];
+
+                        // Validate credentials
+                        if (validate_credentials(username, password, config.accounts)) {
+                            // Set authenticated user in context
+                            ctx.set("auth_user", username);
+
+                            // Continue to next handler
+                            try ctx.next();
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Authentication failed - return 401
+        ctx.set_header("WWW-Authenticate", `Basic realm="${config.realm}"`);
+        ctx.abort_with_error(401, config.unauthorized_message);
+    };
+}
+
+/// Validate credentials against accounts
+fn validate_credentials(username: string, password: string, accounts: [Account]): bool {
+    for (let account in accounts) {
+        if (account.username == username && account.password == password) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// ============================================
+// Tests
+// ============================================
+
+use request.Request;
+
+test "basic_auth allows valid credentials" {
+    let accounts = [Account.new("admin", "secret")];
+
+    // Create request with valid credentials (admin:secret in base64)
+    let request = try! Request.parse("GET /test HTTP/1.1\r\nAuthorization: Basic YWRtaW46c2VjcmV0\r\n\r\n");
+
+    let handler = |ctx| {
+        ctx.string("OK");
+    };
+
+    let ctx = Context.with_handlers(request, [basic_auth(accounts), handler], {:});
+    try! ctx.next();
+
+    // Should reach handler
+    assert ctx.response.body.contains("OK");
+
+    // User should be set in context
+    assert_eq ctx.get_string("auth_user"), "admin";
+}
+
+test "basic_auth rejects invalid credentials" {
+    let accounts = [Account.new("admin", "secret")];
+
+    // Create request with invalid credentials
+    let request = try! Request.parse("GET /test HTTP/1.1\r\nAuthorization: Basic aW52YWxpZDp3cm9uZw==\r\n\r\n");
+
+    let handler = |ctx| {
+        ctx.string("Should not reach here");
+    };
+
+    let ctx = Context.with_handlers(request, [basic_auth(accounts), handler], {:});
+    try! ctx.next();
+
+    // Should abort with 401
+    assert ctx.is_aborted();
+
+    let response_text = ctx.response.build();
+    assert response_text.contains("401");
+    assert response_text.contains("WWW-Authenticate");
+}
+
+test "basic_auth rejects missing authorization" {
+    let accounts = [Account.new("admin", "secret")];
+
+    let request = try! Request.parse("GET /test HTTP/1.1\r\n\r\n");
+
+    let handler = |ctx| {
+        ctx.string("Should not reach here");
+    };
+
+    let ctx = Context.with_handlers(request, [basic_auth(accounts), handler], {:});
+    try! ctx.next();
+
+    // Should abort with 401
+    assert ctx.is_aborted();
+
+    let response_text = ctx.response.build();
+    assert response_text.contains("401");
+}
+
+test "basic_auth config with realm" {
+    let config = BasicAuthConfig.with_accounts([Account.new("user", "pass")])
+        .with_realm("Admin Panel");
+
+    assert_eq config.realm, "Admin Panel";
+}
+
+test "basic_auth config with custom message" {
+    let config = BasicAuthConfig.with_accounts([Account.new("user", "pass")])
+        .with_message("Access Denied");
+
+    assert_eq config.unauthorized_message, "Access Denied";
+}
+
+test "validate_credentials matches correct account" {
+    let accounts = [
+        Account.new("alice", "pass1"),
+        Account.new("bob", "pass2"),
+    ];
+
+    assert validate_credentials("alice", "pass1", accounts);
+    assert validate_credentials("bob", "pass2", accounts);
+    assert !validate_credentials("alice", "wrong", accounts);
+    assert !validate_credentials("charlie", "pass", accounts);
+}

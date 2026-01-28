@@ -1,0 +1,159 @@
+/// Logger middleware for request logging
+///
+/// Logs HTTP requests with method, path, status, duration, and response size.
+/// Provides colorized output for different status codes.
+
+use std.time;
+use context.{Context, HandlerFunc};
+use request.Request;
+
+/// ANSI color codes for terminal output
+let COLOR_RESET = "\x1b[0m";
+let COLOR_GREEN = "\x1b[32m";
+let COLOR_YELLOW = "\x1b[33m";
+let COLOR_RED = "\x1b[31m";
+let COLOR_CYAN = "\x1b[36m";
+let COLOR_WHITE = "\x1b[37m";
+
+/// Logger middleware configuration
+pub struct LoggerConfig {
+    /// Whether to use colored output
+    pub use_colors: bool = true,
+
+    /// Whether to log request details
+    pub log_requests: bool = true,
+}
+
+impl LoggerConfig {
+    /// Create default logger configuration
+    pub fn default(): LoggerConfig {
+        return LoggerConfig {
+            use_colors: true,
+            log_requests: true,
+        };
+    }
+
+    /// Disable colored output
+    pub fn without_colors(self): LoggerConfig {
+        self.use_colors = false;
+        return self;
+    }
+}
+
+/// Create logger middleware with default configuration
+///
+/// Logs each request with:
+/// - HTTP method and path
+/// - Status code (colored by status)
+/// - Response time in milliseconds
+///
+/// # Example
+/// ```nv
+/// app.use(logger());
+/// ```
+pub fn logger(): HandlerFunc {
+    return logger_with_config(LoggerConfig.default());
+}
+
+/// Create logger middleware with custom configuration
+///
+/// # Example
+/// ```nv
+/// let config = LoggerConfig.default().without_colors();
+/// app.use(logger_with_config(config));
+/// ```
+pub fn logger_with_config(config: LoggerConfig): HandlerFunc {
+    return |ctx| {
+        if (!config.log_requests) {
+            try ctx.next();
+            return;
+        }
+
+        // Record start time
+        let start = time.now();
+
+        // Get request info
+        let method = ctx.method();
+        let path = ctx.path();
+
+        // Execute handler chain
+        try ctx.next();
+
+        // Calculate duration
+        let end = time.now();
+        let duration_ms = (end - start) * 1000.0;
+
+        // Get response status (default 200 if not set)
+        let status = ctx.response.status_code || 200;
+
+        // Get response size
+        let size = ctx.response.body.len();
+
+        // Format and print log
+        if (config.use_colors) {
+            print_colored_log(method, path, status, duration_ms, size);
+        } else {
+            print_plain_log(method, path, status, duration_ms, size);
+        }
+    };
+}
+
+/// Print colored log line
+fn print_colored_log(method: string, path: string, status: int, duration_ms: float, size: int) {
+    let status_color = get_status_color(status);
+    let method_color = COLOR_CYAN;
+    let reset = COLOR_RESET;
+
+    println(`${method_color}${method}${reset} ${path} ${status_color}${status}${reset} ${duration_ms:.2f}ms ${size} bytes`);
+}
+
+/// Print plain log line (no colors)
+fn print_plain_log(method: string, path: string, status: int, duration_ms: float, size: int) {
+    println(`${method} ${path} ${status} ${duration_ms:.2f}ms ${size} bytes`);
+}
+
+/// Get color based on status code
+fn get_status_color(status: int): string {
+    if (status >= 200 && status < 300) {
+        return COLOR_GREEN;
+    } else if (status >= 300 && status < 400) {
+        return COLOR_CYAN;
+    } else if (status >= 400 && status < 500) {
+        return COLOR_YELLOW;
+    } else if (status >= 500) {
+        return COLOR_RED;
+    }
+    return COLOR_WHITE;
+}
+
+// ============================================
+// Tests
+// ============================================
+
+test "logger middleware logs request" {
+    let request = try! Request.parse("GET /test HTTP/1.1\r\n\r\n");
+
+    let handler = |ctx| {
+        ctx.string("OK");
+    };
+
+    let ctx = Context.with_handlers(request, [logger(), handler], {:});
+    try! ctx.next();
+
+    // Verify handler executed
+    assert ctx.response.body.contains("OK");
+}
+
+test "logger config without colors" {
+    let config = LoggerConfig.default().without_colors();
+
+    assert_eq config.use_colors, false;
+    assert_eq config.log_requests, true;
+}
+
+test "status color mapping" {
+    assert_eq get_status_color(200), COLOR_GREEN;
+    assert_eq get_status_color(301), COLOR_CYAN;
+    assert_eq get_status_color(404), COLOR_YELLOW;
+    assert_eq get_status_color(500), COLOR_RED;
+}
