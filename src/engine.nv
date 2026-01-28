@@ -46,6 +46,9 @@ pub struct Engine {
 
     /// Worker pool for CPU-intensive routes
     worker_pool: WorkerPool?,
+
+    /// Current active connection count
+    active_connections: int = 0,
 }
 
 impl Engine {
@@ -149,6 +152,13 @@ impl Engine {
         // Validate configuration
         try self.config.validate();
 
+        // Log configuration
+        println("🍶 Sake Framework");
+        println("==================");
+        println(`Server address: ${addr}`);
+        println(`Max connections: ${self.config.max_connections}`);
+        println(`Request timeout: ${self.config.request_timeout}ms`);
+
         // Initialize shutdown channel
         let shutdown_ch = channel::<bool>();
         self.shutdown_ch = shutdown_ch;
@@ -156,12 +166,16 @@ impl Engine {
         // Initialize WorkerPool if enabled
         if (self.config.enable_worker_pool) {
             let pool_size = self.config.effective_worker_pool_size();
+            println(`Worker pool: enabled (${pool_size} threads)`);
             self.worker_pool = try WorkerPool.new(pool_size);
+        } else {
+            println("Worker pool: disabled (spawn mode only)");
         }
 
         // Start TCP listener
         let listener = try TcpListener.bind(addr);
-        println(`🍶 Sake server listening on ${addr}`);
+        println("==================");
+        println(`🍶 Server ready at ${addr}`);
 
         // Accept connections loop
         while (true) {
@@ -174,11 +188,24 @@ impl Engine {
                 }
             }
 
+            // Check max connections limit
+            if (self.active_connections >= self.config.max_connections) {
+                // Connection limit reached - wait before accepting more
+                // TODO: Implement proper connection queueing
+                continue;
+            }
+
             // Accept next connection
             let stream_result = try? listener.accept();
             if (let stream = stream_result) {
+                // Track active connections
+                self.active_connections += 1;
+
                 // Spawn handler for this connection
                 spawn {
+                    defer {
+                        self.active_connections -= 1;
+                    }
                     try? self.handle_connection(stream);
                 }
             }
