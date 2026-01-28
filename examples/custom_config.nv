@@ -24,13 +24,12 @@ fn main() throws {
     // Choose configuration based on environment
     let env = "development";  // or "production", "minimal"
 
-    let config = if (env == "production") {
-        high_throughput
+    let config = balanced;
+    if (env == "production") {
+        config = high_throughput;
     } else if (env == "minimal") {
-        minimal
-    } else {
-        balanced
-    };
+        config = minimal;
+    }
 
     let app = Engine.new(config);
 

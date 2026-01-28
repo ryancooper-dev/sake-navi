@@ -29,7 +29,7 @@ fn main() throws {
 
 fn test_worker_pool_request() {
     // 模拟请求处理
-    let pool = try! Worker.pool(|req: string| {
+    let pool = try! Worker.pool(|req| {
         // 模拟请求处理
         let tid = Worker.thread_id();
         return `处理完成 by thread ${tid}: ${req}`;

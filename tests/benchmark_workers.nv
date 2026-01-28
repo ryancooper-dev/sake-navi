@@ -41,7 +41,7 @@ fn benchmark_mode(use_worker_pool: bool, num_requests: int): float throws {
 
     let app = Engine.new(config);
 
-    let handler = |ctx: Context| {
+    let handler = |ctx| {
         // CPU-intensive work
         let result = fibonacci(35);
         try? ctx.json({"result": result});
@@ -53,7 +53,10 @@ fn benchmark_mode(use_worker_pool: bool, num_requests: int): float throws {
         app.get("/compute", handler);
     }
 
-    let port = if (use_worker_pool) { 8895 } else { 8896 };
+    let port = 8896;
+    if (use_worker_pool) {
+        port = 8895;
+    }
 
     spawn {
         try! app.run(`:${port}`);

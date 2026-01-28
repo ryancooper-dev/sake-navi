@@ -3,7 +3,7 @@
 /// Router handles route registration and matching with support for
 /// path parameters (e.g., /users/:id) and multiple HTTP methods.
 
-use context.HandlerFunc;
+// Note: context is in same module
 
 /// Worker execution mode for routes
 pub enum WorkerMode {
@@ -64,7 +64,7 @@ pub struct RouteBuilder {
 /// # Example
 /// ```nv
 /// let v1 = app.group("/api/v1");
-/// v1.use(auth_middleware);
+/// v1.add_middleware(auth_middleware);
 ///
 /// v1.get("/users", |ctx| {
 ///     ctx.json({"users": []});
@@ -121,7 +121,7 @@ impl Router {
     ///
     /// # Returns
     /// RouteMatch if found, nil otherwise
-    pub fn match(self, method: string, path: string): RouteMatch? {
+    pub fn find_match(self, method: string, path: string): RouteMatch? {
         let method_upper = method.to_uppercase();
 
         for (let route in self.routes) {
@@ -176,7 +176,7 @@ impl Router {
                 }
 
                 // Extract wildcard parameter name (remove the *)
-                let param_name = pattern_part.substring(1, pattern_part.len());
+                let param_name = pattern_part.slice(1, pattern_part.len());
 
                 // Capture all remaining path segments
                 let remaining: [string] = [];
@@ -198,7 +198,7 @@ impl Router {
             // Check if this is a parameter (starts with :)
             if (pattern_part.len() > 0 && pattern_part.starts_with(":")) {
                 // Extract parameter name (remove the :)
-                let param_name = pattern_part.substring(1, pattern_part.len());
+                let param_name = pattern_part.slice(1, pattern_part.len());
                 params[param_name] = path_part;
             } else if (pattern_part != path_part) {
                 // Literal segments must match exactly
@@ -248,9 +248,9 @@ impl RouteBuilder {
     /// ```nv
     /// app.get("/admin", |ctx| {
     ///     ctx.string("Admin panel");
-    /// }).use(auth_middleware).use(log_middleware);
+    /// }).add_middleware(auth_middleware).add_middleware(log_middleware);
     /// ```
-    pub fn use(self, middleware: HandlerFunc): RouteBuilder {
+    pub fn add_middleware(self, middleware: HandlerFunc): RouteBuilder {
         self.middleware.push(middleware);
         self.router.routes[self.route_index].middleware.push(middleware);
         return self;
@@ -268,7 +268,7 @@ impl RouterGroup {
         // Ensure base path doesn't end with /
         let clean_path = base_path;
         if (base_path.len() > 1 && base_path.ends_with("/")) {
-            clean_path = base_path.substring(0, base_path.len() - 1);
+            clean_path = base_path.slice(0, base_path.len() - 1);
         }
 
         return RouterGroup {
@@ -386,10 +386,10 @@ impl RouterGroup {
     /// # Example
     /// ```nv
     /// let api = app.group("/api");
-    /// api.use(auth_middleware);
-    /// api.use(rate_limit_middleware);
+    /// api.add_middleware(auth_middleware);
+    /// api.add_middleware(rate_limit_middleware);
     /// ```
-    pub fn use(self, middleware: HandlerFunc) {
+    pub fn add_middleware(self, middleware: HandlerFunc) {
         self.middleware.push(middleware);
     }
 
@@ -444,12 +444,12 @@ test "match exact path" {
     let router = Router.new();
     router.add_route("GET", "/users", |ctx| {});
 
-    let result = router.match("GET", "/users");
+    let result = router.find_match("GET", "/users");
     assert result != nil;
 
-    if (let match = result) {
-        assert_eq match.route.path, "/users";
-        assert_eq match.params.len(), 0;
+    if (let matched_route = result) {
+        assert_eq matched_route.route.path, "/users";
+        assert_eq matched_route.params.len(), 0;
     }
 }
 
@@ -457,12 +457,12 @@ test "match with path parameter" {
     let router = Router.new();
     router.add_route("GET", "/users/:id", |ctx| {});
 
-    let result = router.match("GET", "/users/123");
+    let result = router.find_match("GET", "/users/123");
     assert result != nil;
 
-    if (let match = result) {
-        assert_eq match.route.path, "/users/:id";
-        assert_eq match.params.get("id"), "123";
+    if (let matched_route = result) {
+        assert_eq matched_route.route.path, "/users/:id";
+        assert_eq matched_route.params.get("id"), "123";
     }
 }
 
@@ -470,12 +470,12 @@ test "match with multiple parameters" {
     let router = Router.new();
     router.add_route("GET", "/users/:userId/posts/:postId", |ctx| {});
 
-    let result = router.match("GET", "/users/42/posts/99");
+    let result = router.find_match("GET", "/users/42/posts/99");
     assert result != nil;
 
-    if (let match = result) {
-        assert_eq match.params.get("userId"), "42";
-        assert_eq match.params.get("postId"), "99";
+    if (let matched_route = result) {
+        assert_eq matched_route.params.get("userId"), "42";
+        assert_eq matched_route.params.get("postId"), "99";
     }
 }
 
@@ -483,7 +483,7 @@ test "no match for different method" {
     let router = Router.new();
     router.add_route("GET", "/users", |ctx| {});
 
-    let result = router.match("POST", "/users");
+    let result = router.find_match("POST", "/users");
     assert result == nil;
 }
 
@@ -491,7 +491,7 @@ test "no match for different path" {
     let router = Router.new();
     router.add_route("GET", "/users", |ctx| {});
 
-    let result = router.match("GET", "/posts");
+    let result = router.find_match("GET", "/posts");
     assert result == nil;
 }
 
@@ -499,10 +499,10 @@ test "no match for different segment count" {
     let router = Router.new();
     router.add_route("GET", "/users/:id", |ctx| {});
 
-    let result = router.match("GET", "/users");
+    let result = router.find_match("GET", "/users");
     assert result == nil;
 
-    let result2 = router.match("GET", "/users/123/extra");
+    let result2 = router.find_match("GET", "/users/123/extra");
     assert result2 == nil;
 }
 
@@ -510,7 +510,7 @@ test "method matching is case insensitive" {
     let router = Router.new();
     router.add_route("GET", "/test", |ctx| {});
 
-    let result = router.match("get", "/test");
+    let result = router.find_match("get", "/test");
     assert result != nil;
 }
 
@@ -641,7 +641,7 @@ test "router group middleware inheritance" {
     let mw2 = |ctx| { try ctx.next(); };
 
     let api = RouterGroup.new(router, "/api", [mw1]);
-    api.use(mw2);
+    api.add_middleware(mw2);
 
     let v1 = api.group("/v1");
 
@@ -677,8 +677,8 @@ test "route level middleware" {
     let mw2 = |ctx| { try ctx.next(); };
 
     router.add_route("GET", "/admin", |ctx| {})
-        .use(mw1)
-        .use(mw2);
+        .add_middleware(mw1)
+        .add_middleware(mw2);
 
     assert_eq router.routes.len(), 1;
     assert_eq router.routes[0].middleware.len(), 2;
@@ -689,7 +689,7 @@ test "route level middleware with worker mode" {
     let auth_mw = |ctx| { try ctx.next(); };
 
     router.add_route("GET", "/compute", |ctx| {})
-        .use(auth_mw)
+        .add_middleware(auth_mw)
         .worker();
 
     assert_eq router.routes[0].middleware.len(), 1;

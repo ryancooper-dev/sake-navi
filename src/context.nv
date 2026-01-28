@@ -13,13 +13,11 @@
 /// }
 /// ```
 
-use request.Request;
-use response.Response;
-use worker_context.{WorkerContext, WorkerResponse};
+// Note: request, response, worker_context are in same module
 
 /// Handler function type
 /// All handlers and middleware use this signature
-pub type HandlerFunc = |(ctx: Context) throws|;
+pub type HandlerFunc = |(Context) throws|;
 
 /// Request context - the primary interface for handlers
 struct Context {
@@ -127,8 +125,8 @@ impl Context {
     /// let page = ctx.default_query("page", "1");  // Returns "2"
     /// let limit = ctx.default_query("limit", "10");  // Returns "10" (not in URL)
     /// ```
-    pub fn default_query(self, name: string, default: string): string {
-        return self.query(name) || default;
+    pub fn default_query(self, name: string, default_value: string): string {
+        return self.query(name) || default_value;
     }
 
     /// Get request header by name

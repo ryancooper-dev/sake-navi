@@ -4,7 +4,7 @@
 /// CPU-bound tasks in parallel across multiple CPU cores.
 
 use std.worker.Worker;
-use worker_context.{WorkerContext, WorkerResponse};
+// Note: worker_context is in same module
 
 /// Task submitted to worker pool
 struct WorkerTask {

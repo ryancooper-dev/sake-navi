@@ -92,7 +92,7 @@ pub fn basic_auth_with_config(config: BasicAuthConfig): HandlerFunc {
         if (let auth = auth_header) {
             // Parse Basic auth header
             if (auth.starts_with("Basic ")) {
-                let encoded = auth.substring(6, auth.len());
+                let encoded = auth.slice(6, auth.len());
 
                 // Decode base64
                 let decoded_result = try? base64.decode(encoded);

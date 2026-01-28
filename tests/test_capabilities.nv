@@ -39,7 +39,7 @@ fn main() throws {
     
     // Test 4: WorkerPool
     println("4. WorkerPool 线程池");
-    let pool = try Worker.pool(|n: int| {
+    let pool = try Worker.pool(|n| {
         return n * 2;
     }, 4);
     

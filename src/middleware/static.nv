@@ -102,7 +102,7 @@ pub fn static_with_config(config: StaticConfig): HandlerFunc {
             }
 
             // Remove prefix from path
-            request_path = request_path.substring(config.prefix.len(), request_path.len());
+            request_path = request_path.slice(config.prefix.len(), request_path.len());
         }
 
         // Ensure path starts with /

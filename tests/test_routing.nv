@@ -238,8 +238,8 @@ test "group middleware applied to routes" {
     let mw2 = |ctx| { try ctx.next(); };
 
     let api = RouterGroup.new(router, "/api", []);
-    api.use(mw1);
-    api.use(mw2);
+    api.add_middleware(mw1);
+    api.add_middleware(mw2);
 
     api.get("/users", |ctx| {});
 
@@ -253,10 +253,10 @@ test "nested group inherits parent middleware" {
     let child_mw = |ctx| { try ctx.next(); };
 
     let api = RouterGroup.new(router, "/api", []);
-    api.use(parent_mw);
+    api.add_middleware(parent_mw);
 
     let v1 = api.group("/v1");
-    v1.use(child_mw);
+    v1.add_middleware(child_mw);
 
     v1.get("/users", |ctx| {});
 
@@ -274,8 +274,8 @@ test "route specific middleware" {
     let log_mw = |ctx| { try ctx.next(); };
 
     router.add_route("GET", "/admin", |ctx| {})
-        .use(auth_mw)
-        .use(log_mw);
+        .add_middleware(auth_mw)
+        .add_middleware(log_mw);
 
     assert_eq router.routes[0].middleware.len(), 2;
 }
@@ -285,7 +285,7 @@ test "route middleware with worker mode" {
     let mw = |ctx| { try ctx.next(); };
 
     router.add_route("GET", "/compute", |ctx| {})
-        .use(mw)
+        .add_middleware(mw)
         .worker();
 
     assert_eq router.routes[0].middleware.len(), 1;
@@ -299,7 +299,7 @@ test "group and route middleware combined" {
 
     let api = RouterGroup.new(router, "/api", [group_mw]);
 
-    api.get("/users", |ctx| {}).use(route_mw);
+    api.get("/users", |ctx| {}).add_middleware(route_mw);
 
     // Should have both group and route middleware
     assert_eq router.routes[0].middleware.len(), 2;

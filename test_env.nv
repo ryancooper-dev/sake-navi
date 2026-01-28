@@ -1,12 +1,13 @@
 // Test 3: Check environment and basic process info
 use std.env;
+use std.process;
 
 fn main() throws {
     // Environment variables
     let home = env.get("HOME");
     println(`HOME: ${home || "not set"}`);
     
-    // Args
-    let args = env.args();
+    // Args (use std.process.args, not env.args)
+    let args = process.args();
     println(`Args count: ${args.len()}`);
 }

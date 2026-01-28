@@ -23,12 +23,7 @@
 
 use std.net.{TcpListener, TcpStream};
 use std.io.{BufReader};
-use config.Config;
-use router.{Router, RouteBuilder, RouterGroup, WorkerMode, RouteMatch};
-use context.{Context, HandlerFunc};
-use request.Request;
-use response.Response;
-use worker_pool.WorkerPool;
+// Note: config, router, context, request, response, worker_pool are in same module
 
 /// Sake web framework engine
 pub struct Engine {
@@ -166,12 +161,12 @@ impl Engine {
     ///
     /// # Example
     /// ```nv
-    /// app.use(|ctx| {
+    /// app.add_middleware(|ctx| {
     ///     println("Request received");
     ///     try ctx.next();
     /// });
     /// ```
-    pub fn use(self, middleware: HandlerFunc) {
+    pub fn add_middleware(self, middleware: HandlerFunc) {
         self.middleware.push(middleware);
     }
 
@@ -189,7 +184,7 @@ impl Engine {
     /// ```nv
     /// // Create API v1 group
     /// let v1 = app.group("/api/v1");
-    /// v1.use(auth_middleware);
+    /// v1.add_middleware(auth_middleware);
     /// v1.get("/users", |ctx| {
     ///     ctx.json({"users": []});
     /// });
@@ -344,20 +339,20 @@ impl Engine {
         let request = try self.parse_request_or_error(raw_request);
 
         // Match route
-        let route_match = self.router.match(request.method, request.path);
+        let route_match = self.router.find_match(request.method, request.path);
 
-        if (let match = route_match) {
+        if (let matched_route = route_match) {
             // Check if this route should use worker pool
-            let use_worker = match.route.worker_mode == WorkerMode.Worker &&
+            let use_worker = matched_route.route.worker_mode == WorkerMode.Worker &&
                             self.config.enable_worker_pool &&
                             self.worker_pool != nil;
 
             if (use_worker) {
                 // Execute in worker pool
-                try self.handle_worker_execution(stream, request, match);
+                try self.handle_worker_execution(stream, request, matched_route);
             } else {
                 // Execute with spawn (default)
-                try self.handle_spawn_execution(stream, request, match);
+                try self.handle_spawn_execution(stream, request, matched_route);
             }
         } else {
             // No route found - send 404
@@ -369,9 +364,9 @@ impl Engine {
     /// Handle request execution in spawn mode (concurrent, single-threaded)
     ///
     /// Builds the complete handler chain:
-    /// 1. Global middleware (from app.use())
-    /// 2. Group middleware (from group.use())
-    /// 3. Route middleware (from route.use())
+    /// 1. Global middleware (from app.add_middleware())
+    /// 2. Group middleware (from group.add_middleware())
+    /// 3. Route middleware (from route.add_middleware())
     /// 4. Route handler
     ///
     /// # Arguments
@@ -524,11 +519,11 @@ test "register multiple routes" {
 test "add middleware" {
     let app = Engine.with_defaults();
 
-    app.use(|ctx| {
+    app.add_middleware(|ctx| {
         try ctx.next();
     });
 
-    app.use(|ctx| {
+    app.add_middleware(|ctx| {
         try ctx.next();
     });
 
