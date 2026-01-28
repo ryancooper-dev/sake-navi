@@ -1,0 +1,461 @@
+/// Comprehensive Routing Tests for Sake Framework
+///
+/// Tests all routing features:
+/// - Exact paths
+/// - Path parameters (:param)
+/// - Wildcard routes (*filepath)
+/// - Router groups
+/// - Nested groups
+/// - Route-level middleware
+/// - All HTTP methods (GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD, ANY)
+
+use router.{Router, RouterGroup, WorkerMode};
+use context.HandlerFunc;
+
+// ============================================
+// Exact Path Matching
+// ============================================
+
+test "exact path matching" {
+    let router = Router.new();
+    router.add_route("GET", "/", |ctx| {});
+    router.add_route("GET", "/users", |ctx| {});
+    router.add_route("GET", "/users/profile", |ctx| {});
+
+    // Should match
+    assert router.match("GET", "/") != nil;
+    assert router.match("GET", "/users") != nil;
+    assert router.match("GET", "/users/profile") != nil;
+
+    // Should not match
+    assert router.match("GET", "/user") == nil;
+    assert router.match("GET", "/users/") == nil;
+    assert router.match("GET", "/users/profile/extra") == nil;
+}
+
+test "method matching is case insensitive" {
+    let router = Router.new();
+    router.add_route("GET", "/test", |ctx| {});
+
+    assert router.match("get", "/test") != nil;
+    assert router.match("Get", "/test") != nil;
+    assert router.match("GET", "/test") != nil;
+}
+
+test "different methods same path" {
+    let router = Router.new();
+    router.add_route("GET", "/users", |ctx| {});
+    router.add_route("POST", "/users", |ctx| {});
+    router.add_route("DELETE", "/users", |ctx| {});
+
+    let get_match = router.match("GET", "/users");
+    let post_match = router.match("POST", "/users");
+    let delete_match = router.match("DELETE", "/users");
+
+    assert get_match != nil;
+    assert post_match != nil;
+    assert delete_match != nil;
+
+    // Verify correct method matched
+    if (let m = get_match) {
+        assert_eq m.route.method, "GET";
+    }
+    if (let m = post_match) {
+        assert_eq m.route.method, "POST";
+    }
+}
+
+// ============================================
+// Path Parameters
+// ============================================
+
+test "single path parameter" {
+    let router = Router.new();
+    router.add_route("GET", "/users/:id", |ctx| {});
+
+    let result = router.match("GET", "/users/123");
+    assert result != nil;
+
+    if (let match = result) {
+        assert_eq match.params.get("id"), "123";
+    }
+}
+
+test "multiple path parameters" {
+    let router = Router.new();
+    router.add_route("GET", "/users/:userId/posts/:postId", |ctx| {});
+
+    let result = router.match("GET", "/users/42/posts/99");
+    assert result != nil;
+
+    if (let match = result) {
+        assert_eq match.params.get("userId"), "42";
+        assert_eq match.params.get("postId"), "99";
+    }
+}
+
+test "path parameter with special characters" {
+    let router = Router.new();
+    router.add_route("GET", "/files/:filename", |ctx| {});
+
+    let result = router.match("GET", "/files/report-2024.pdf");
+    assert result != nil;
+
+    if (let match = result) {
+        assert_eq match.params.get("filename"), "report-2024.pdf";
+    }
+}
+
+// ============================================
+// Wildcard Routes
+// ============================================
+
+test "wildcard captures single segment" {
+    let router = Router.new();
+    router.add_route("GET", "/static/*filepath", |ctx| {});
+
+    let result = router.match("GET", "/static/style.css");
+    assert result != nil;
+
+    if (let match = result) {
+        assert_eq match.params.get("filepath"), "style.css";
+    }
+}
+
+test "wildcard captures multiple segments" {
+    let router = Router.new();
+    router.add_route("GET", "/static/*filepath", |ctx| {});
+
+    let result = router.match("GET", "/static/css/vendor/bootstrap.min.css");
+    assert result != nil;
+
+    if (let match = result) {
+        assert_eq match.params.get("filepath"), "css/vendor/bootstrap.min.css";
+    }
+}
+
+test "wildcard with prefix path" {
+    let router = Router.new();
+    router.add_route("GET", "/api/v1/*path", |ctx| {});
+
+    let result = router.match("GET", "/api/v1/users/123/posts");
+    assert result != nil;
+
+    if (let match = result) {
+        assert_eq match.params.get("path"), "users/123/posts";
+    }
+}
+
+test "wildcard does not match without trailing path" {
+    let router = Router.new();
+    router.add_route("GET", "/static/*filepath", |ctx| {});
+
+    // Should not match - wildcard needs at least one segment
+    let result = router.match("GET", "/static");
+    assert result == nil;
+}
+
+test "mixed parameters and wildcard" {
+    let router = Router.new();
+    router.add_route("GET", "/users/:id/files/*filepath", |ctx| {});
+
+    let result = router.match("GET", "/users/42/files/docs/report.pdf");
+    assert result != nil;
+
+    if (let match = result) {
+        assert_eq match.params.get("id"), "42";
+        assert_eq match.params.get("filepath"), "docs/report.pdf";
+    }
+}
+
+// ============================================
+// Router Groups
+// ============================================
+
+test "basic router group" {
+    let router = Router.new();
+    let api = RouterGroup.new(router, "/api", []);
+
+    api.get("/users", |ctx| {});
+    api.post("/users", |ctx| {});
+
+    assert_eq router.routes.len(), 2;
+    assert_eq router.routes[0].path, "/api/users";
+    assert_eq router.routes[1].path, "/api/users";
+}
+
+test "router group with trailing slash normalization" {
+    let router = Router.new();
+    let api = RouterGroup.new(router, "/api/", []);
+
+    assert_eq api.base_path, "/api";
+
+    api.get("/users", |ctx| {});
+    assert_eq router.routes[0].path, "/api/users";
+}
+
+test "router group root path" {
+    let router = Router.new();
+    let api = RouterGroup.new(router, "/api", []);
+
+    api.get("/", |ctx| {});
+
+    assert_eq router.routes[0].path, "/api";
+}
+
+test "nested router groups" {
+    let router = Router.new();
+    let api = RouterGroup.new(router, "/api", []);
+    let v1 = api.group("/v1");
+    let v2 = api.group("/v2");
+
+    v1.get("/users", |ctx| {});
+    v2.get("/users", |ctx| {});
+
+    assert_eq router.routes.len(), 2;
+    assert_eq router.routes[0].path, "/api/v1/users";
+    assert_eq router.routes[1].path, "/api/v2/users";
+}
+
+test "deeply nested groups" {
+    let router = Router.new();
+    let api = RouterGroup.new(router, "/api", []);
+    let v1 = api.group("/v1");
+    let admin = v1.group("/admin");
+
+    admin.get("/settings", |ctx| {});
+
+    assert_eq router.routes[0].path, "/api/v1/admin/settings";
+}
+
+// ============================================
+// Group Middleware
+// ============================================
+
+test "group middleware applied to routes" {
+    let router = Router.new();
+    let mw1 = |ctx| { try ctx.next(); };
+    let mw2 = |ctx| { try ctx.next(); };
+
+    let api = RouterGroup.new(router, "/api", []);
+    api.use(mw1);
+    api.use(mw2);
+
+    api.get("/users", |ctx| {});
+
+    // Route should have group middleware
+    assert_eq router.routes[0].middleware.len(), 2;
+}
+
+test "nested group inherits parent middleware" {
+    let router = Router.new();
+    let parent_mw = |ctx| { try ctx.next(); };
+    let child_mw = |ctx| { try ctx.next(); };
+
+    let api = RouterGroup.new(router, "/api", []);
+    api.use(parent_mw);
+
+    let v1 = api.group("/v1");
+    v1.use(child_mw);
+
+    v1.get("/users", |ctx| {});
+
+    // Route should have both parent and child middleware
+    assert_eq router.routes[0].middleware.len(), 2;
+}
+
+// ============================================
+// Route-Level Middleware
+// ============================================
+
+test "route specific middleware" {
+    let router = Router.new();
+    let auth_mw = |ctx| { try ctx.next(); };
+    let log_mw = |ctx| { try ctx.next(); };
+
+    router.add_route("GET", "/admin", |ctx| {})
+        .use(auth_mw)
+        .use(log_mw);
+
+    assert_eq router.routes[0].middleware.len(), 2;
+}
+
+test "route middleware with worker mode" {
+    let router = Router.new();
+    let mw = |ctx| { try ctx.next(); };
+
+    router.add_route("GET", "/compute", |ctx| {})
+        .use(mw)
+        .worker();
+
+    assert_eq router.routes[0].middleware.len(), 1;
+    assert router.routes[0].worker_mode == WorkerMode.Worker;
+}
+
+test "group and route middleware combined" {
+    let router = Router.new();
+    let group_mw = |ctx| { try ctx.next(); };
+    let route_mw = |ctx| { try ctx.next(); };
+
+    let api = RouterGroup.new(router, "/api", [group_mw]);
+
+    api.get("/users", |ctx| {}).use(route_mw);
+
+    // Should have both group and route middleware
+    assert_eq router.routes[0].middleware.len(), 2;
+}
+
+// ============================================
+// HTTP Methods
+// ============================================
+
+test "all http methods supported" {
+    let router = Router.new();
+
+    router.add_route("GET", "/1", |ctx| {});
+    router.add_route("POST", "/2", |ctx| {});
+    router.add_route("PUT", "/3", |ctx| {});
+    router.add_route("DELETE", "/4", |ctx| {});
+    router.add_route("PATCH", "/5", |ctx| {});
+    router.add_route("OPTIONS", "/6", |ctx| {});
+    router.add_route("HEAD", "/7", |ctx| {});
+
+    assert_eq router.routes.len(), 7;
+    assert_eq router.routes[0].method, "GET";
+    assert_eq router.routes[1].method, "POST";
+    assert_eq router.routes[2].method, "PUT";
+    assert_eq router.routes[3].method, "DELETE";
+    assert_eq router.routes[4].method, "PATCH";
+    assert_eq router.routes[5].method, "OPTIONS";
+    assert_eq router.routes[6].method, "HEAD";
+}
+
+test "group supports all http methods" {
+    let router = Router.new();
+    let group = RouterGroup.new(router, "/api", []);
+
+    group.get("/1", |ctx| {});
+    group.post("/2", |ctx| {});
+    group.put("/3", |ctx| {});
+    group.delete("/4", |ctx| {});
+    group.patch("/5", |ctx| {});
+    group.options("/6", |ctx| {});
+    group.head("/7", |ctx| {});
+
+    assert_eq router.routes.len(), 7;
+}
+
+// ============================================
+// Worker Mode
+// ============================================
+
+test "route worker mode configuration" {
+    let router = Router.new();
+
+    router.add_route("GET", "/spawn", |ctx| {});
+    router.add_route("GET", "/worker", |ctx| {}).worker();
+
+    assert router.routes[0].worker_mode == WorkerMode.Spawn;
+    assert router.routes[1].worker_mode == WorkerMode.Worker;
+}
+
+test "group route can use worker mode" {
+    let router = Router.new();
+    let api = RouterGroup.new(router, "/api", []);
+
+    api.get("/compute", |ctx| {}).worker();
+
+    assert router.routes[0].worker_mode == WorkerMode.Worker;
+}
+
+// ============================================
+// Edge Cases
+// ============================================
+
+test "empty router matches nothing" {
+    let router = Router.new();
+
+    assert router.match("GET", "/") == nil;
+    assert router.match("GET", "/anything") == nil;
+}
+
+test "parameter names are preserved" {
+    let router = Router.new();
+    router.add_route("GET", "/users/:user_id/posts/:post_id", |ctx| {});
+
+    let result = router.match("GET", "/users/123/posts/456");
+    assert result != nil;
+
+    if (let match = result) {
+        assert_eq match.params.get("user_id"), "123";
+        assert_eq match.params.get("post_id"), "456";
+    }
+}
+
+test "wildcard parameter name is preserved" {
+    let router = Router.new();
+    router.add_route("GET", "/files/*file_path", |ctx| {});
+
+    let result = router.match("GET", "/files/docs/readme.md");
+    assert result != nil;
+
+    if (let match = result) {
+        assert_eq match.params.get("file_path"), "docs/readme.md";
+    }
+}
+
+test "empty path segments handled correctly" {
+    let router = Router.new();
+    router.add_route("GET", "/users", |ctx| {});
+
+    // Double slashes should not match
+    assert router.match("GET", "//users") == nil;
+    assert router.match("GET", "/users//") == nil;
+}
+
+// ============================================
+// Priority and Ordering
+// ============================================
+
+test "routes matched in registration order" {
+    let router = Router.new();
+
+    // More specific route registered first
+    router.add_route("GET", "/users/admin", |ctx| {});
+    router.add_route("GET", "/users/:id", |ctx| {});
+
+    // Should match exact route, not parameter route
+    let result = router.match("GET", "/users/admin");
+    assert result != nil;
+
+    if (let match = result) {
+        assert_eq match.route.path, "/users/admin";
+        // Should have no parameters
+        assert_eq match.params.len(), 0;
+    }
+}
+
+test "wildcard vs parameter priority" {
+    let router = Router.new();
+
+    router.add_route("GET", "/files/:id", |ctx| {});
+    router.add_route("GET", "/files/*path", |ctx| {});
+
+    // Parameter route matches first (single segment)
+    let result = router.match("GET", "/files/123");
+    assert result != nil;
+
+    if (let match = result) {
+        assert_eq match.route.path, "/files/:id";
+        assert_eq match.params.get("id"), "123";
+    }
+
+    // Wildcard matches multiple segments
+    let result2 = router.match("GET", "/files/docs/readme.md");
+    assert result2 != nil;
+
+    if (let match = result2) {
+        assert_eq match.route.path, "/files/*path";
+        assert_eq match.params.get("path"), "docs/readme.md";
+    }
+}

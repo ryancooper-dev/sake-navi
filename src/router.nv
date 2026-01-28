@@ -27,6 +27,9 @@ pub struct Route {
 
     /// Execution mode (spawn vs worker pool)
     pub worker_mode: WorkerMode = WorkerMode.Spawn,
+
+    /// Route-specific middleware (executed before handler)
+    pub middleware: [HandlerFunc] = [],
 }
 
 /// Route matching result
@@ -48,6 +51,34 @@ pub struct Router {
 pub struct RouteBuilder {
     router: Router,
     route_index: int,
+    middleware: [HandlerFunc] = [],
+}
+
+/// RouterGroup for organizing routes with common prefix and middleware
+///
+/// RouterGroup allows you to create route groups with:
+/// - Common path prefix (e.g., "/api/v1")
+/// - Group-level middleware (e.g., authentication)
+/// - Nested groups (e.g., "/api/v1/admin")
+///
+/// # Example
+/// ```nv
+/// let v1 = app.group("/api/v1");
+/// v1.use(auth_middleware);
+///
+/// v1.get("/users", |ctx| {
+///     ctx.json({"users": []});
+/// });
+///
+/// let admin = v1.group("/admin");
+/// admin.get("/settings", |ctx| {
+///     ctx.json({"settings": {}});
+/// });
+/// ```
+pub struct RouterGroup {
+    router: Router,
+    base_path: string,
+    middleware: [HandlerFunc],
 }
 
 impl Router {
@@ -112,9 +143,14 @@ impl Router {
 
     /// Match a route path pattern against a request path
     ///
+    /// Supports:
+    /// - Exact paths: `/users`
+    /// - Path parameters: `/users/:id`
+    /// - Wildcard routes: `/static/*filepath` (must be last segment)
+    ///
     /// # Arguments
-    /// * `pattern` - Route pattern (e.g., "/users/:id")
-    /// * `path` - Request path (e.g., "/users/123")
+    /// * `pattern` - Route pattern (e.g., "/users/:id", "/static/*filepath")
+    /// * `path` - Request path (e.g., "/users/123", "/static/css/main.css")
     ///
     /// # Returns
     /// Extracted parameters if matched, nil otherwise
@@ -122,15 +158,41 @@ impl Router {
         let pattern_parts = pattern.split("/");
         let path_parts = path.split("/");
 
-        // Must have same number of segments
-        if (pattern_parts.len() != path_parts.len()) {
-            return nil;
-        }
-
         let params: <string, string> = {:};
 
         for (let i in 0..pattern_parts.len()) {
             let pattern_part = pattern_parts[i];
+
+            // Check if this is a wildcard (starts with *)
+            if (pattern_part.len() > 0 && pattern_part.starts_with("*")) {
+                // Wildcard must be the last segment
+                if (i != pattern_parts.len() - 1) {
+                    return nil;
+                }
+
+                // Path must have at least as many segments as pattern
+                if (path_parts.len() < pattern_parts.len()) {
+                    return nil;
+                }
+
+                // Extract wildcard parameter name (remove the *)
+                let param_name = pattern_part.substring(1, pattern_part.len());
+
+                // Capture all remaining path segments
+                let remaining: [string] = [];
+                for (let j in i..path_parts.len()) {
+                    remaining.push(path_parts[j]);
+                }
+
+                params[param_name] = remaining.join("/");
+                return params;
+            }
+
+            // Check if we've run out of path segments
+            if (i >= path_parts.len()) {
+                return nil;
+            }
+
             let path_part = path_parts[i];
 
             // Check if this is a parameter (starts with :)
@@ -142,6 +204,11 @@ impl Router {
                 // Literal segments must match exactly
                 return nil;
             }
+        }
+
+        // If no wildcard, path must have exact number of segments
+        if (pattern_parts.len() != path_parts.len()) {
+            return nil;
         }
 
         return params;
@@ -167,6 +234,179 @@ impl RouteBuilder {
     pub fn worker(self): RouteBuilder {
         self.router.routes[self.route_index].worker_mode = WorkerMode.Worker;
         return self;
+    }
+
+    /// Add middleware to this specific route
+    ///
+    /// # Arguments
+    /// * `middleware` - Middleware handler to add
+    ///
+    /// # Returns
+    /// Self for chaining
+    ///
+    /// # Example
+    /// ```nv
+    /// app.get("/admin", |ctx| {
+    ///     ctx.string("Admin panel");
+    /// }).use(auth_middleware).use(log_middleware);
+    /// ```
+    pub fn use(self, middleware: HandlerFunc): RouteBuilder {
+        self.middleware.push(middleware);
+        self.router.routes[self.route_index].middleware.push(middleware);
+        return self;
+    }
+
+    /// Finalize route configuration (internal use)
+    ///
+    /// This is called automatically when RouteBuilder goes out of scope.
+    /// Updates the route with collected middleware from group and route level.
+    fn finalize(self) {
+        // Copy all middleware from builder to route
+        for (let mw in self.middleware) {
+            self.router.routes[self.route_index].middleware.push(mw);
+        }
+    }
+}
+
+impl RouterGroup {
+    /// Create a new RouterGroup
+    ///
+    /// # Arguments
+    /// * `router` - Router instance
+    /// * `base_path` - Path prefix for all routes in this group
+    /// * `middleware` - Initial middleware for this group
+    pub fn new(router: Router, base_path: string, middleware: [HandlerFunc]): RouterGroup {
+        // Ensure base path doesn't end with /
+        let clean_path = base_path;
+        if (base_path.len() > 1 && base_path.ends_with("/")) {
+            clean_path = base_path.substring(0, base_path.len() - 1);
+        }
+
+        return RouterGroup {
+            router,
+            base_path: clean_path,
+            middleware,
+        };
+    }
+
+    /// Combine group base path with route path
+    fn combine_path(self, path: string): string {
+        // Handle root path
+        if (path == "/") {
+            if (self.base_path == "") {
+                return "/";
+            }
+            return self.base_path;
+        }
+
+        // Ensure path starts with /
+        let clean_path = path;
+        if (!path.starts_with("/")) {
+            clean_path = "/" + path;
+        }
+
+        if (self.base_path == "" || self.base_path == "/") {
+            return clean_path;
+        }
+
+        return self.base_path + clean_path;
+    }
+
+    /// Register a GET route in this group
+    pub fn get(self, path: string, handler: HandlerFunc): RouteBuilder {
+        let full_path = self.combine_path(path);
+        let builder = self.router.add_route("GET", full_path, handler);
+        builder.middleware = self.middleware;
+        return builder;
+    }
+
+    /// Register a POST route in this group
+    pub fn post(self, path: string, handler: HandlerFunc): RouteBuilder {
+        let full_path = self.combine_path(path);
+        let builder = self.router.add_route("POST", full_path, handler);
+        builder.middleware = self.middleware;
+        return builder;
+    }
+
+    /// Register a PUT route in this group
+    pub fn put(self, path: string, handler: HandlerFunc): RouteBuilder {
+        let full_path = self.combine_path(path);
+        let builder = self.router.add_route("PUT", full_path, handler);
+        builder.middleware = self.middleware;
+        return builder;
+    }
+
+    /// Register a DELETE route in this group
+    pub fn delete(self, path: string, handler: HandlerFunc): RouteBuilder {
+        let full_path = self.combine_path(path);
+        let builder = self.router.add_route("DELETE", full_path, handler);
+        builder.middleware = self.middleware;
+        return builder;
+    }
+
+    /// Register a PATCH route in this group
+    pub fn patch(self, path: string, handler: HandlerFunc): RouteBuilder {
+        let full_path = self.combine_path(path);
+        let builder = self.router.add_route("PATCH", full_path, handler);
+        builder.middleware = self.middleware;
+        return builder;
+    }
+
+    /// Register an OPTIONS route in this group
+    pub fn options(self, path: string, handler: HandlerFunc): RouteBuilder {
+        let full_path = self.combine_path(path);
+        let builder = self.router.add_route("OPTIONS", full_path, handler);
+        builder.middleware = self.middleware;
+        return builder;
+    }
+
+    /// Register a HEAD route in this group
+    pub fn head(self, path: string, handler: HandlerFunc): RouteBuilder {
+        let full_path = self.combine_path(path);
+        let builder = self.router.add_route("HEAD", full_path, handler);
+        builder.middleware = self.middleware;
+        return builder;
+    }
+
+    /// Add middleware to this group
+    ///
+    /// # Arguments
+    /// * `middleware` - Middleware handler
+    ///
+    /// # Example
+    /// ```nv
+    /// let api = app.group("/api");
+    /// api.use(auth_middleware);
+    /// api.use(rate_limit_middleware);
+    /// ```
+    pub fn use(self, middleware: HandlerFunc) {
+        self.middleware.push(middleware);
+    }
+
+    /// Create a nested group
+    ///
+    /// # Arguments
+    /// * `path` - Path prefix for the nested group (relative to this group)
+    ///
+    /// # Returns
+    /// New RouterGroup with combined path and middleware
+    ///
+    /// # Example
+    /// ```nv
+    /// let api = app.group("/api");
+    /// let v1 = api.group("/v1");  // Creates group with path "/api/v1"
+    /// let v2 = api.group("/v2");  // Creates group with path "/api/v2"
+    /// ```
+    pub fn group(self, path: string): RouterGroup {
+        let full_path = self.combine_path(path);
+
+        // Copy parent middleware to child group
+        let child_middleware: [HandlerFunc] = [];
+        for (let mw in self.middleware) {
+            child_middleware.push(mw);
+        }
+
+        return RouterGroup.new(self.router, full_path, child_middleware);
     }
 }
 
@@ -285,4 +525,163 @@ test "match path no parameters" {
 test "match path no match" {
     let params = Router.match_path("/users", "/posts");
     assert params == nil;
+}
+
+test "match wildcard route" {
+    let params = Router.match_path("/static/*filepath", "/static/css/main.css");
+    assert params != nil;
+
+    if (let p = params) {
+        assert_eq p.get("filepath"), "css/main.css";
+    }
+}
+
+test "match wildcard route single segment" {
+    let params = Router.match_path("/files/*path", "/files/readme.txt");
+    assert params != nil;
+
+    if (let p = params) {
+        assert_eq p.get("path"), "readme.txt";
+    }
+}
+
+test "match wildcard route multiple segments" {
+    let params = Router.match_path("/assets/*filepath", "/assets/js/vendor/jquery.min.js");
+    assert params != nil;
+
+    if (let p = params) {
+        assert_eq p.get("filepath"), "js/vendor/jquery.min.js";
+    }
+}
+
+test "match wildcard with prefix" {
+    let params = Router.match_path("/api/v1/*path", "/api/v1/users/123/posts");
+    assert params != nil;
+
+    if (let p = params) {
+        assert_eq p.get("path"), "users/123/posts";
+    }
+}
+
+test "wildcard no match - too few segments" {
+    let params = Router.match_path("/static/*filepath", "/static");
+    assert params == nil;
+}
+
+test "mixed params and wildcard" {
+    let params = Router.match_path("/users/:id/files/*filepath", "/users/42/files/docs/report.pdf");
+    assert params != nil;
+
+    if (let p = params) {
+        assert_eq p.get("id"), "42";
+        assert_eq p.get("filepath"), "docs/report.pdf";
+    }
+}
+
+test "router group basic path combination" {
+    let router = Router.new();
+    let group = RouterGroup.new(router, "/api", []);
+
+    assert_eq group.base_path, "/api";
+    assert_eq group.combine_path("/users"), "/api/users";
+}
+
+test "router group with trailing slash" {
+    let router = Router.new();
+    let group = RouterGroup.new(router, "/api/", []);
+
+    // Trailing slash should be removed
+    assert_eq group.base_path, "/api";
+}
+
+test "router group root path" {
+    let router = Router.new();
+    let group = RouterGroup.new(router, "/api", []);
+
+    assert_eq group.combine_path("/"), "/api";
+}
+
+test "router group add route" {
+    let router = Router.new();
+    let group = RouterGroup.new(router, "/api/v1", []);
+
+    group.get("/users", |ctx| {});
+
+    // Route should be added with full path
+    assert_eq router.routes.len(), 1;
+    assert_eq router.routes[0].path, "/api/v1/users";
+    assert_eq router.routes[0].method, "GET";
+}
+
+test "router group nested groups" {
+    let router = Router.new();
+    let api = RouterGroup.new(router, "/api", []);
+    let v1 = api.group("/v1");
+
+    v1.get("/users", |ctx| {});
+
+    assert_eq v1.base_path, "/api/v1";
+    assert_eq router.routes.len(), 1;
+    assert_eq router.routes[0].path, "/api/v1/users";
+}
+
+test "router group middleware inheritance" {
+    let router = Router.new();
+    let mw1 = |ctx| { try ctx.next(); };
+    let mw2 = |ctx| { try ctx.next(); };
+
+    let api = RouterGroup.new(router, "/api", [mw1]);
+    api.use(mw2);
+
+    let v1 = api.group("/v1");
+
+    // Child group should inherit parent middleware
+    assert_eq v1.middleware.len(), 2;
+}
+
+test "router group all http methods" {
+    let router = Router.new();
+    let group = RouterGroup.new(router, "/api", []);
+
+    group.get("/1", |ctx| {});
+    group.post("/2", |ctx| {});
+    group.put("/3", |ctx| {});
+    group.delete("/4", |ctx| {});
+    group.patch("/5", |ctx| {});
+    group.options("/6", |ctx| {});
+    group.head("/7", |ctx| {});
+
+    assert_eq router.routes.len(), 7;
+    assert_eq router.routes[0].method, "GET";
+    assert_eq router.routes[1].method, "POST";
+    assert_eq router.routes[2].method, "PUT";
+    assert_eq router.routes[3].method, "DELETE";
+    assert_eq router.routes[4].method, "PATCH";
+    assert_eq router.routes[5].method, "OPTIONS";
+    assert_eq router.routes[6].method, "HEAD";
+}
+
+test "route level middleware" {
+    let router = Router.new();
+    let mw1 = |ctx| { try ctx.next(); };
+    let mw2 = |ctx| { try ctx.next(); };
+
+    router.add_route("GET", "/admin", |ctx| {})
+        .use(mw1)
+        .use(mw2);
+
+    assert_eq router.routes.len(), 1;
+    assert_eq router.routes[0].middleware.len(), 2;
+}
+
+test "route level middleware with worker mode" {
+    let router = Router.new();
+    let auth_mw = |ctx| { try ctx.next(); };
+
+    router.add_route("GET", "/compute", |ctx| {})
+        .use(auth_mw)
+        .worker();
+
+    assert_eq router.routes[0].middleware.len(), 1;
+    assert router.routes[0].worker_mode == WorkerMode.Worker;
 }

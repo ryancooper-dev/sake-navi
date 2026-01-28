@@ -24,7 +24,7 @@
 use std.net.{TcpListener, TcpStream};
 use std.io.{BufReader};
 use config.Config;
-use router.{Router, RouteBuilder, WorkerMode, RouteMatch};
+use router.{Router, RouteBuilder, RouterGroup, WorkerMode, RouteMatch};
 use context.{Context, HandlerFunc};
 use request.Request;
 use response.Response;
@@ -120,6 +120,40 @@ impl Engine {
         return self.router.add_route("PATCH", path, handler);
     }
 
+    /// Register an OPTIONS route
+    pub fn options(self, path: string, handler: HandlerFunc): RouteBuilder {
+        return self.router.add_route("OPTIONS", path, handler);
+    }
+
+    /// Register a HEAD route
+    pub fn head(self, path: string, handler: HandlerFunc): RouteBuilder {
+        return self.router.add_route("HEAD", path, handler);
+    }
+
+    /// Register a route that matches ALL HTTP methods
+    ///
+    /// Registers the same handler for GET, POST, PUT, DELETE, PATCH, OPTIONS, and HEAD.
+    ///
+    /// # Arguments
+    /// * `path` - Route path (supports :param and *wildcard syntax)
+    /// * `handler` - Handler function
+    ///
+    /// # Example
+    /// ```nv
+    /// app.any("/ping", |ctx| {
+    ///     ctx.json({"message": "pong"});
+    /// });
+    /// ```
+    pub fn any(self, path: string, handler: HandlerFunc) {
+        self.router.add_route("GET", path, handler);
+        self.router.add_route("POST", path, handler);
+        self.router.add_route("PUT", path, handler);
+        self.router.add_route("DELETE", path, handler);
+        self.router.add_route("PATCH", path, handler);
+        self.router.add_route("OPTIONS", path, handler);
+        self.router.add_route("HEAD", path, handler);
+    }
+
     /// Add global middleware
     ///
     /// # Arguments
@@ -134,6 +168,35 @@ impl Engine {
     /// ```
     pub fn use(self, middleware: HandlerFunc) {
         self.middleware.push(middleware);
+    }
+
+    /// Create a route group with common path prefix
+    ///
+    /// RouterGroups allow organizing routes with common prefixes and middleware.
+    ///
+    /// # Arguments
+    /// * `path` - Path prefix for all routes in this group
+    ///
+    /// # Returns
+    /// RouterGroup instance for adding routes
+    ///
+    /// # Example
+    /// ```nv
+    /// // Create API v1 group
+    /// let v1 = app.group("/api/v1");
+    /// v1.use(auth_middleware);
+    /// v1.get("/users", |ctx| {
+    ///     ctx.json({"users": []});
+    /// });
+    ///
+    /// // Create nested admin group
+    /// let admin = v1.group("/admin");
+    /// admin.get("/settings", |ctx| {
+    ///     ctx.json({"settings": {}});
+    /// });
+    /// ```
+    pub fn group(self, path: string): RouterGroup {
+        return RouterGroup.new(self.router, path, []);
     }
 
     /// Start the HTTP server
@@ -258,6 +321,12 @@ impl Engine {
 
     /// Handle request execution in spawn mode (concurrent, single-threaded)
     ///
+    /// Builds the complete handler chain:
+    /// 1. Global middleware (from app.use())
+    /// 2. Group middleware (from group.use())
+    /// 3. Route middleware (from route.use())
+    /// 4. Route handler
+    ///
     /// # Arguments
     /// * `stream` - TCP stream
     /// * `request` - Parsed HTTP request
@@ -268,15 +337,20 @@ impl Engine {
         request: Request,
         route_match: RouteMatch
     ) throws {
-        // Build handler chain: global middleware + route handler
+        // Build handler chain: global middleware + route middleware + handler
         let handlers: [HandlerFunc] = [];
 
-        // Add global middleware
+        // 1. Add global middleware
         for (let mw in self.middleware) {
             handlers.push(mw);
         }
 
-        // Add route handler
+        // 2. Add route-specific middleware (includes group middleware if from group)
+        for (let mw in route_match.route.middleware) {
+            handlers.push(mw);
+        }
+
+        // 3. Add route handler
         handlers.push(route_match.route.handler);
 
         // Create context
@@ -412,4 +486,35 @@ test "add middleware" {
     });
 
     assert_eq app.middleware.len(), 2;
+}
+
+test "register OPTIONS route" {
+    let app = Engine.default();
+    app.options("/api/users", |ctx| { ctx.string("options"); });
+
+    assert_eq app.router.routes.len(), 1;
+    assert_eq app.router.routes[0].method, "OPTIONS";
+}
+
+test "register HEAD route" {
+    let app = Engine.default();
+    app.head("/api/health", |ctx| { ctx.string("ok"); });
+
+    assert_eq app.router.routes.len(), 1;
+    assert_eq app.router.routes[0].method, "HEAD";
+}
+
+test "register ANY route" {
+    let app = Engine.default();
+    app.any("/ping", |ctx| { ctx.json({"pong": true}); });
+
+    // ANY registers 7 methods: GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD
+    assert_eq app.router.routes.len(), 7;
+
+    // Verify all methods are registered
+    let methods = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"];
+    for (let i in 0..methods.len()) {
+        assert_eq app.router.routes[i].method, methods[i];
+        assert_eq app.router.routes[i].path, "/ping";
+    }
 }
