@@ -1,0 +1,258 @@
+/// Static file serving middleware
+///
+/// Serves static files from a directory.
+
+use std.fs;
+use std.path;
+use context.{Context, HandlerFunc};
+
+/// Static file middleware configuration
+pub struct StaticConfig {
+    /// Root directory for static files
+    pub root: string,
+
+    /// URL path prefix (e.g., "/static")
+    pub prefix: string = "",
+
+    /// Whether to serve index.html for directories
+    pub index: bool = true,
+
+    /// Index file name
+    pub index_file: string = "index.html",
+
+    /// Whether to list directory contents
+    pub list_directories: bool = false,
+}
+
+impl StaticConfig {
+    /// Create configuration with root directory
+    pub fn with_root(root: string): StaticConfig {
+        return StaticConfig {
+            root,
+            prefix: "",
+            index: true,
+            index_file: "index.html",
+            list_directories: false,
+        };
+    }
+
+    /// Set URL prefix
+    pub fn with_prefix(self, prefix: string): StaticConfig {
+        self.prefix = prefix;
+        return self;
+    }
+
+    /// Disable index file serving
+    pub fn without_index(self): StaticConfig {
+        self.index = false;
+        return self;
+    }
+
+    /// Set custom index filename
+    pub fn with_index_file(self, filename: string): StaticConfig {
+        self.index_file = filename;
+        return self;
+    }
+
+    /// Enable directory listing
+    pub fn with_directory_listing(self): StaticConfig {
+        self.list_directories = true;
+        return self;
+    }
+}
+
+/// Create static file middleware
+///
+/// # Arguments
+/// * `root` - Root directory containing static files
+///
+/// # Example
+/// ```nv
+/// // Serve files from ./public directory
+/// app.use(static_files("./public"));
+///
+/// // GET /style.css -> serves ./public/style.css
+/// ```
+pub fn static_files(root: string): HandlerFunc {
+    let config = StaticConfig.with_root(root);
+    return static_with_config(config);
+}
+
+/// Create static file middleware with custom configuration
+///
+/// # Example
+/// ```nv
+/// let config = StaticConfig.with_root("./assets")
+///     .with_prefix("/static")
+///     .with_directory_listing();
+/// app.use(static_with_config(config));
+///
+/// // GET /static/image.png -> serves ./assets/image.png
+/// ```
+pub fn static_with_config(config: StaticConfig): HandlerFunc {
+    return |ctx| {
+        let request_path = ctx.path();
+
+        // Check if path matches prefix
+        if (config.prefix.len() > 0) {
+            if (!request_path.starts_with(config.prefix)) {
+                // Not for this static handler - continue
+                try ctx.next();
+                return;
+            }
+
+            // Remove prefix from path
+            request_path = request_path.substring(config.prefix.len(), request_path.len());
+        }
+
+        // Ensure path starts with /
+        if (!request_path.starts_with("/")) {
+            request_path = "/" + request_path;
+        }
+
+        // Build full file path
+        let file_path = config.root + request_path;
+
+        // Security: Prevent directory traversal
+        if (file_path.contains("..")) {
+            ctx.abort_with_status(403);
+            return;
+        }
+
+        // Check if file exists
+        let exists = try? fs.exists(file_path);
+        if (exists != true) {
+            // File not found - continue to next handler
+            try ctx.next();
+            return;
+        }
+
+        // Check if path is a directory
+        let is_dir = try? fs.is_dir(file_path);
+        if (is_dir == true) {
+            if (config.index) {
+                // Try to serve index file
+                let index_path = file_path;
+                if (!index_path.ends_with("/")) {
+                    index_path += "/";
+                }
+                index_path += config.index_file;
+
+                let index_exists = try? fs.exists(index_path);
+                if (index_exists == true) {
+                    try! ctx.file(index_path);
+                    return;
+                }
+            }
+
+            if (config.list_directories) {
+                // List directory contents
+                serve_directory_listing(ctx, file_path, request_path);
+                return;
+            }
+
+            // Directory without index - 404
+            ctx.abort_with_status(404);
+            return;
+        }
+
+        // Serve file
+        do {
+            try ctx.file(file_path);
+        } catch (e) {
+            // Error reading file
+            ctx.abort_with_error(500, "Error reading file");
+        }
+    };
+}
+
+/// Serve directory listing as HTML
+fn serve_directory_listing(ctx: Context, dir_path: string, url_path: string) {
+    use std.fs;
+
+    // Read directory entries
+    let entries_result = try? fs.read_dir(dir_path);
+    if (entries_result == nil) {
+        ctx.abort_with_status(500);
+        return;
+    }
+
+    let entries = entries_result!;
+
+    // Build HTML
+    let html = `<!DOCTYPE html>
+<html>
+<head>
+    <title>Directory: ${url_path}</title>
+    <style>
+        body { font-family: monospace; padding: 20px; }
+        a { display: block; padding: 5px; text-decoration: none; }
+        a:hover { background: #f0f0f0; }
+    </style>
+</head>
+<body>
+    <h1>Directory: ${url_path}</h1>
+    <hr>
+`;
+
+    // Add parent directory link
+    if (url_path != "/") {
+        html += `    <a href="..">[Parent Directory]</a>\n`;
+    }
+
+    // Add entries
+    for (let entry in entries) {
+        let is_dir = try? fs.is_dir(dir_path + "/" + entry);
+        let suffix = "";
+        if (is_dir == true) {
+            suffix = "/";
+        }
+        html += `    <a href="${entry}${suffix}">${entry}${suffix}</a>\n`;
+    }
+
+    html += `</body>
+</html>`;
+
+    ctx.html(html);
+}
+
+// ============================================
+// Tests
+// ============================================
+
+use request.Request;
+
+test "static config with root" {
+    let config = StaticConfig.with_root("./public");
+
+    assert_eq config.root, "./public";
+    assert_eq config.index, true;
+}
+
+test "static config with prefix" {
+    let config = StaticConfig.with_root("./assets")
+        .with_prefix("/static");
+
+    assert_eq config.prefix, "/static";
+}
+
+test "static config without index" {
+    let config = StaticConfig.with_root("./public")
+        .without_index();
+
+    assert_eq config.index, false;
+}
+
+test "static config with directory listing" {
+    let config = StaticConfig.with_root("./public")
+        .with_directory_listing();
+
+    assert_eq config.list_directories, true;
+}
+
+test "static config with custom index file" {
+    let config = StaticConfig.with_root("./public")
+        .with_index_file("home.html");
+
+    assert_eq config.index_file, "home.html";
+}

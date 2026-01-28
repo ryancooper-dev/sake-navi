@@ -275,7 +275,66 @@ impl Context {
         self.response.content_type(content_type);
         self.response.write(data);
     }
-    
+
+    /// Send file with automatic content-type detection
+    ///
+    /// # Arguments
+    /// * `file_path` - Path to file to send
+    ///
+    /// # Example
+    /// ```nv
+    /// ctx.file("./static/image.png");
+    /// ```
+    pub fn file(self, file_path: string) throws {
+        use std.fs;
+
+        // Read file contents
+        let contents = try fs.read_to_string(file_path);
+
+        // Detect content type from extension
+        let content_type = detect_content_type(file_path);
+        self.response.content_type(content_type);
+
+        // Write file contents
+        self.response.write(contents);
+    }
+
+    /// Send file as download with custom filename
+    ///
+    /// Sets Content-Disposition header to trigger download.
+    ///
+    /// # Arguments
+    /// * `file_path` - Path to file
+    /// * `download_name` - Filename for download (optional, defaults to file basename)
+    ///
+    /// # Example
+    /// ```nv
+    /// ctx.download("./reports/data.csv", "report-2024.csv");
+    /// ```
+    pub fn download(self, file_path: string, download_name: string?) throws {
+        use std.fs;
+        use std.path;
+
+        // Read file contents
+        let contents = try fs.read_to_string(file_path);
+
+        // Determine download filename
+        let filename = "";
+        if (let name = download_name) {
+            filename = name;
+        } else {
+            filename = path.basename(file_path);
+        }
+
+        // Set headers for download
+        let content_type = detect_content_type(file_path);
+        self.response.content_type(content_type);
+        self.response.header("Content-Disposition", `attachment; filename="${filename}"`);
+
+        // Write file contents
+        self.response.write(contents);
+    }
+
     /// Redirect to another URL
     pub fn redirect(self, code: int, url: string) {
         self.response.status(code);
@@ -440,6 +499,91 @@ impl Context {
             self.request.body
         );
     }
+}
+
+// ============================================
+// Helper Functions
+// ============================================
+
+/// Detect content type from file extension
+fn detect_content_type(file_path: string): string {
+    let lower_path = file_path.to_lowercase();
+
+    // HTML
+    if (lower_path.ends_with(".html") || lower_path.ends_with(".htm")) {
+        return "text/html; charset=utf-8";
+    }
+
+    // CSS
+    if (lower_path.ends_with(".css")) {
+        return "text/css; charset=utf-8";
+    }
+
+    // JavaScript
+    if (lower_path.ends_with(".js")) {
+        return "application/javascript; charset=utf-8";
+    }
+
+    // JSON
+    if (lower_path.ends_with(".json")) {
+        return "application/json; charset=utf-8";
+    }
+
+    // Images
+    if (lower_path.ends_with(".png")) {
+        return "image/png";
+    }
+    if (lower_path.ends_with(".jpg") || lower_path.ends_with(".jpeg")) {
+        return "image/jpeg";
+    }
+    if (lower_path.ends_with(".gif")) {
+        return "image/gif";
+    }
+    if (lower_path.ends_with(".svg")) {
+        return "image/svg+xml";
+    }
+    if (lower_path.ends_with(".ico")) {
+        return "image/x-icon";
+    }
+
+    // Fonts
+    if (lower_path.ends_with(".woff")) {
+        return "font/woff";
+    }
+    if (lower_path.ends_with(".woff2")) {
+        return "font/woff2";
+    }
+    if (lower_path.ends_with(".ttf")) {
+        return "font/ttf";
+    }
+
+    // Documents
+    if (lower_path.ends_with(".pdf")) {
+        return "application/pdf";
+    }
+    if (lower_path.ends_with(".xml")) {
+        return "application/xml; charset=utf-8";
+    }
+    if (lower_path.ends_with(".txt")) {
+        return "text/plain; charset=utf-8";
+    }
+    if (lower_path.ends_with(".csv")) {
+        return "text/csv; charset=utf-8";
+    }
+
+    // Archives
+    if (lower_path.ends_with(".zip")) {
+        return "application/zip";
+    }
+    if (lower_path.ends_with(".tar")) {
+        return "application/x-tar";
+    }
+    if (lower_path.ends_with(".gz")) {
+        return "application/gzip";
+    }
+
+    // Default
+    return "application/octet-stream";
 }
 
 // ============================================

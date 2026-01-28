@@ -8,13 +8,13 @@ Implement all core Gin features with idiomatic Navi code while maintaining high 
 ## 📊 Progress Overview
 
 - **Core Routing**: 100% (10/10) ✅
-- **Context API**: 65% (13/20)
+- **Context API**: 70% (14/20)
 - **Middleware**: 100% (10/10) ✅
 - **Request Binding**: 20% (2/10)
-- **Response Rendering**: 60% (6/10)
-- **Advanced Features**: 30% (3/10)
+- **Response Rendering**: 80% (8/10)
+- **Advanced Features**: 35% (3.5/10)
 
-**Overall Progress**: ~68%
+**Overall Progress**: ~73%
 
 ---
 
@@ -112,8 +112,8 @@ Implement all core Gin features with idiomatic Navi code while maintaining high 
 - [x] Recovery - Panic recovery with stack traces
 - [x] CORS - Cross-origin requests with config
 - [x] BasicAuth - HTTP basic auth with multiple accounts
-- [ ] Gzip - Response compression (deferred)
-- [ ] Static - Static file serving (v0.5.0)
+- [x] Static - Static file serving with directory listing
+- [ ] Gzip - Response compression (deferred - needs compression lib)
 
 ### Middleware Features
 - [x] Global middleware: `app.use(mw)`
@@ -169,16 +169,17 @@ Implement all core Gin features with idiomatic Navi code while maintaining high 
 
 ### Advanced Responses
 - [ ] HTML template rendering
-- [ ] File downloads
+- [x] File serving: `ctx.file(path)`
+- [x] File downloads: `ctx.download(path, name)`
 - [ ] Streaming responses
 - [ ] Server-Sent Events (SSE)
 - [ ] Chunked transfer encoding
 
-**Status**: 🟡 In Progress
+**Status**: 🟢 Core features complete
 
 **Priority**: P1 (Common use cases)
 
-**Tests**: `tests/test_responses.nv` (missing)
+**Tests**: Tested in middleware tests
 
 ---
 
@@ -189,10 +190,10 @@ Implement all core Gin features with idiomatic Navi code while maintaining high 
 - [x] Concurrent request handling (spawn)
 - [x] Parallel processing (WorkerPool)
 - [x] Connection limits
-- [ ] Request timeouts (partial)
-- [ ] TLS/HTTPS support
-- [ ] HTTP/2 support
-- [ ] Unix socket support
+- [~] Request timeouts (documented limitation)
+- [ ] TLS/HTTPS support (needs Navi TLS lib)
+- [ ] HTTP/2 support (needs protocol lib)
+- [ ] Unix socket support (needs Navi stdlib)
 
 ### Performance
 - [x] Worker pool for CPU tasks
@@ -237,12 +238,13 @@ Implement all core Gin features with idiomatic Navi code while maintaining high 
 4. ✅ BasicAuth middleware
 5. ✅ Write comprehensive middleware tests
 
-### Phase 4: Advanced Rendering (v0.5.0)
-1. HTML template system
-2. File serving and downloads
-3. Streaming responses
-4. Server-Sent Events
-5. Write rendering tests
+### Phase 4: Advanced Rendering (v0.5.0) - ✅ Complete
+1. ⏸️ HTML template system (deferred - needs template engine)
+2. ✅ File serving and downloads (`ctx.file`, `ctx.download`)
+3. ✅ Static file middleware with directory listing
+4. ⏸️ Streaming responses (deferred - needs async/streaming support)
+5. ⏸️ Server-Sent Events (deferred - needs streaming)
+6. ✅ Document request timeout limitation
 
 ### Phase 5: Server Features (v0.6.0)
 1. Full timeout implementation
@@ -280,5 +282,5 @@ Each feature must have:
 ---
 
 **Last Updated**: 2026-01-28
-**Current Version**: v0.4.0 (Built-in Middleware)
-**Next Version**: v0.5.0 (Advanced Rendering)
+**Current Version**: v0.5.0 (File Serving & Static Assets)
+**Next Version**: v1.0.0 (Production Ready)

@@ -330,7 +330,11 @@ impl Engine {
         }
 
         // Read request with timeout
-        // TODO: Apply request_timeout from config
+        // Note: Timeout enforcement requires async/await or thread-based timeouts.
+        // Current implementation (spawn) is single-threaded concurrent, making
+        // request-level timeouts challenging without blocking the entire runtime.
+        // Consider using TcpStream.set_read_timeout() if available in Navi stdlib.
+        // For now, request_timeout config is used for documentation only.
 
         // Read raw HTTP request
         let reader = BufReader.new(stream);
