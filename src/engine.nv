@@ -47,8 +47,11 @@ pub struct Engine {
     /// Worker pool for CPU-intensive routes
     worker_pool: WorkerPool?,
 
-    /// Current active connection count
-    active_connections: int = 0,
+    /// Connection counter channel (send +1 to increment, -1 to decrement)
+    conn_counter_ch: channel::<int>?,
+
+    /// Connection query channel (send unit, receive current count)
+    conn_query_ch: channel::<int>?,
 }
 
 impl Engine {
@@ -66,6 +69,8 @@ impl Engine {
             middleware: [],
             shutdown_ch: nil,
             worker_pool: nil,
+            conn_counter_ch: nil,
+            conn_query_ch: nil,
         };
     }
 
@@ -226,6 +231,30 @@ impl Engine {
         let shutdown_ch = channel::<bool>();
         self.shutdown_ch = shutdown_ch;
 
+        // Initialize connection counter channels
+        let conn_counter_ch = channel::<int>();
+        let conn_query_ch = channel::<int>();
+        self.conn_counter_ch = conn_counter_ch;
+        self.conn_query_ch = conn_query_ch;
+
+        // Spawn connection counter task
+        spawn {
+            let count = 0;
+            while (true) {
+                // Try to receive counter update (+1 or -1)
+                let update = try? conn_counter_ch.try_recv();
+                if (let u = update) {
+                    count += u;
+                }
+
+                // Try to receive query request
+                let query = try? conn_query_ch.try_recv();
+                if (query != nil) {
+                    try! conn_query_ch.send(count);
+                }
+            }
+        }
+
         // Initialize WorkerPool if enabled
         if (self.config.enable_worker_pool) {
             let pool_size = self.config.effective_worker_pool_size();
@@ -252,22 +281,36 @@ impl Engine {
             }
 
             // Check max connections limit
-            if (self.active_connections >= self.config.max_connections) {
-                // Connection limit reached - wait before accepting more
-                // TODO: Implement proper connection queueing
-                continue;
+            if (let query_ch = self.conn_query_ch) {
+                if (let counter_ch = self.conn_counter_ch) {
+                    // Query current connection count
+                    try! query_ch.send(0);
+                    let current_count = try query_ch.recv();
+
+                    if (current_count >= self.config.max_connections) {
+                        // Connection limit reached - sleep briefly to avoid busy loop
+                        use std.time;
+                        time.sleep(0.01.seconds());
+                        continue;
+                    }
+                }
             }
 
             // Accept next connection
             let stream_result = try? listener.accept();
             if (let stream = stream_result) {
-                // Track active connections
-                self.active_connections += 1;
+                // Increment active connections
+                if (let counter_ch = self.conn_counter_ch) {
+                    try! counter_ch.send(1);
+                }
 
                 // Spawn handler for this connection
                 spawn {
                     defer {
-                        self.active_connections -= 1;
+                        // Decrement active connections
+                        if (let counter_ch = self.conn_counter_ch) {
+                            try! counter_ch.send(-1);
+                        }
                     }
                     try? self.handle_connection(stream);
                 }

@@ -255,17 +255,6 @@ impl RouteBuilder {
         self.router.routes[self.route_index].middleware.push(middleware);
         return self;
     }
-
-    /// Finalize route configuration (internal use)
-    ///
-    /// This is called automatically when RouteBuilder goes out of scope.
-    /// Updates the route with collected middleware from group and route level.
-    fn finalize(self) {
-        // Copy all middleware from builder to route
-        for (let mw in self.middleware) {
-            self.router.routes[self.route_index].middleware.push(mw);
-        }
-    }
 }
 
 impl RouterGroup {
@@ -316,7 +305,10 @@ impl RouterGroup {
     pub fn get(self, path: string, handler: HandlerFunc): RouteBuilder {
         let full_path = self.combine_path(path);
         let builder = self.router.add_route("GET", full_path, handler);
-        builder.middleware = self.middleware;
+        // Copy group middleware to route (not just builder)
+        for (let mw in self.middleware) {
+            builder.router.routes[builder.route_index].middleware.push(mw);
+        }
         return builder;
     }
 
@@ -324,7 +316,10 @@ impl RouterGroup {
     pub fn post(self, path: string, handler: HandlerFunc): RouteBuilder {
         let full_path = self.combine_path(path);
         let builder = self.router.add_route("POST", full_path, handler);
-        builder.middleware = self.middleware;
+        // Copy group middleware to route (not just builder)
+        for (let mw in self.middleware) {
+            builder.router.routes[builder.route_index].middleware.push(mw);
+        }
         return builder;
     }
 
@@ -332,7 +327,10 @@ impl RouterGroup {
     pub fn put(self, path: string, handler: HandlerFunc): RouteBuilder {
         let full_path = self.combine_path(path);
         let builder = self.router.add_route("PUT", full_path, handler);
-        builder.middleware = self.middleware;
+        // Copy group middleware to route (not just builder)
+        for (let mw in self.middleware) {
+            builder.router.routes[builder.route_index].middleware.push(mw);
+        }
         return builder;
     }
 
@@ -340,7 +338,10 @@ impl RouterGroup {
     pub fn delete(self, path: string, handler: HandlerFunc): RouteBuilder {
         let full_path = self.combine_path(path);
         let builder = self.router.add_route("DELETE", full_path, handler);
-        builder.middleware = self.middleware;
+        // Copy group middleware to route (not just builder)
+        for (let mw in self.middleware) {
+            builder.router.routes[builder.route_index].middleware.push(mw);
+        }
         return builder;
     }
 
@@ -348,7 +349,10 @@ impl RouterGroup {
     pub fn patch(self, path: string, handler: HandlerFunc): RouteBuilder {
         let full_path = self.combine_path(path);
         let builder = self.router.add_route("PATCH", full_path, handler);
-        builder.middleware = self.middleware;
+        // Copy group middleware to route (not just builder)
+        for (let mw in self.middleware) {
+            builder.router.routes[builder.route_index].middleware.push(mw);
+        }
         return builder;
     }
 
@@ -356,7 +360,10 @@ impl RouterGroup {
     pub fn options(self, path: string, handler: HandlerFunc): RouteBuilder {
         let full_path = self.combine_path(path);
         let builder = self.router.add_route("OPTIONS", full_path, handler);
-        builder.middleware = self.middleware;
+        // Copy group middleware to route (not just builder)
+        for (let mw in self.middleware) {
+            builder.router.routes[builder.route_index].middleware.push(mw);
+        }
         return builder;
     }
 
@@ -364,7 +371,10 @@ impl RouterGroup {
     pub fn head(self, path: string, handler: HandlerFunc): RouteBuilder {
         let full_path = self.combine_path(path);
         let builder = self.router.add_route("HEAD", full_path, handler);
-        builder.middleware = self.middleware;
+        // Copy group middleware to route (not just builder)
+        for (let mw in self.middleware) {
+            builder.router.routes[builder.route_index].middleware.push(mw);
+        }
         return builder;
     }
 
