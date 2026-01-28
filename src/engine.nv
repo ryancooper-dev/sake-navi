@@ -21,6 +21,8 @@
 /// }
 /// ```
 
+use std.net.{TcpListener, TcpStream};
+use std.io.{BufReader};
 use config.Config;
 use router.Router;
 use context.{Context, HandlerFunc};
@@ -133,12 +135,105 @@ impl Engine {
         // Validate configuration
         try self.config.validate();
 
-        // TODO: Initialize WorkerPool if enabled
-        // TODO: Start TCP listener
-        // TODO: Accept connections in loop
-        // TODO: Spawn handler for each connection
+        // Initialize shutdown channel
+        let shutdown_ch = channel::<bool>();
+        self.shutdown_ch = shutdown_ch;
 
-        throw "Engine.run() not yet implemented";
+        // TODO: Initialize WorkerPool if enabled
+
+        // Start TCP listener
+        let listener = try TcpListener.bind(addr);
+        println(`🍶 Sake server listening on ${addr}`);
+
+        // Accept connections loop
+        while (true) {
+            // Check for shutdown signal (non-blocking)
+            if (let ch = self.shutdown_ch) {
+                let should_stop = try? ch.try_recv();
+                if (should_stop != nil) {
+                    println("🍶 Sake server shutting down...");
+                    break;
+                }
+            }
+
+            // Accept next connection
+            let stream_result = try? listener.accept();
+            if (let stream = stream_result) {
+                // Spawn handler for this connection
+                spawn {
+                    try? self.handle_connection(stream);
+                }
+            }
+        }
+
+        println("🍶 Sake server stopped");
+    }
+
+    /// Handle a single client connection
+    ///
+    /// # Arguments
+    /// * `stream` - TCP stream for the connection
+    fn handle_connection(self, stream: TcpStream) throws {
+        defer {
+            stream.close();
+        }
+
+        // Read request with timeout
+        // TODO: Apply request_timeout from config
+
+        // Read raw HTTP request
+        let reader = BufReader.new(stream);
+        let raw_request = try reader.read_to_string();
+
+        // Parse HTTP request
+        let request = try self.parse_request_or_error(raw_request);
+
+        // Match route
+        let route_match = self.router.match(request.method, request.path);
+
+        if (let match = route_match) {
+            // Build handler chain: global middleware + route handler
+            let handlers: [HandlerFunc] = [];
+
+            // Add global middleware
+            for (let mw in self.middleware) {
+                handlers.push(mw);
+            }
+
+            // Add route handler
+            handlers.push(match.route.handler);
+
+            // Create context
+            let ctx = Context.with_handlers(request, handlers, match.params);
+
+            // Execute handler chain
+            try ctx.next();
+
+            // Send response
+            try ctx.response.send(stream);
+        } else {
+            // No route found - send 404
+            let response = Response.not_found();
+            try response.send(stream);
+        }
+    }
+
+    /// Parse request or return error response
+    ///
+    /// # Arguments
+    /// * `raw` - Raw HTTP request string
+    ///
+    /// # Returns
+    /// Parsed Request or throws on error
+    fn parse_request_or_error(self, raw: string): Request throws {
+        do {
+            let request = try Request.parse(raw);
+            return request;
+        } catch (e) {
+            // Log parse error
+            println(`Error parsing request: ${e.error()}`);
+            throw "Malformed request";
+        }
     }
 
     /// Shutdown the server gracefully

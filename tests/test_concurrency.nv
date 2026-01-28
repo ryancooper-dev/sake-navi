@@ -1,0 +1,237 @@
+/// Tests for concurrent request handling (User Story 1)
+///
+/// Tests verify that the framework handles multiple concurrent
+/// I/O-bound requests efficiently using spawn + channel.
+
+use std.time;
+use std.net.{TcpClient};
+use engine.Engine;
+use context.Context;
+
+/// Helper: Start server in background and return port
+fn start_test_server(handler: |(ctx: Context)|): int throws {
+    let app = Engine.default();
+    app.get("/test", handler);
+
+    // Find available port (simplified - use fixed port for now)
+    let port = 8888;
+
+    spawn {
+        try! app.run(`:${port}`);
+    }
+
+    // Give server time to start
+    time.sleep(0.1.seconds());
+
+    return port;
+}
+
+/// Helper: Make HTTP GET request
+fn make_request(port: int, path: string): string throws {
+    let client = try TcpClient.connect(`localhost:${port}`);
+
+    defer {
+        client.close();
+    }
+
+    let request = `GET ${path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n`;
+    try client.write(request.as_bytes());
+
+    let response = try client.read_to_string();
+    return response;
+}
+
+// ============================================
+// T009: Basic spawn-based request handling
+// ============================================
+
+test "basic spawn-based request handling" {
+    let port = try! start_test_server(|ctx| {
+        ctx.string("Hello from spawn!");
+    });
+
+    // Make a simple request
+    let response = try! make_request(port, "/test");
+
+    assert response.contains("200 OK");
+    assert response.contains("Hello from spawn!");
+}
+
+test "multiple sequential requests work" {
+    let port = try! start_test_server(|ctx| {
+        let count = ctx.query("count") || "0";
+        ctx.json({"count": count});
+    });
+
+    // Make 3 sequential requests
+    for (let i in 0..3) {
+        let response = try! make_request(port, `/test?count=${i}`);
+        assert response.contains("200 OK");
+        assert response.contains(`"count":"${i}"`);
+    }
+}
+
+// ============================================
+// T010: 100 concurrent I/O-bound requests
+// ============================================
+
+test "100 concurrent io-bound requests" {
+    let port = try! start_test_server(|ctx| {
+        // Simulate I/O delay
+        time.sleep(0.01.seconds());
+        let id = ctx.query("id") || "0";
+        ctx.json({"id": id, "status": "ok"});
+    });
+
+    // Channel to collect results
+    let results_ch = channel::<bool>();
+
+    // Launch 100 concurrent requests
+    for (let i in 0..100) {
+        spawn {
+            let result = try? make_request(port, `/test?id=${i}`);
+            if (let resp = result) {
+                let success = resp.contains("200 OK") && resp.contains(`"id":"${i}"`);
+                try! results_ch.send(success);
+            } else {
+                try! results_ch.send(false);
+            }
+        }
+    }
+
+    // Collect all results
+    let success_count = 0;
+    for (let i in 0..100) {
+        let success = try! results_ch.recv();
+        if (success) {
+            success_count += 1;
+        }
+    }
+
+    // All requests should succeed
+    assert_eq success_count, 100;
+}
+
+// ============================================
+// T011: Concurrent connections without blocking
+// ============================================
+
+test "concurrent connections without blocking" {
+    let port = try! start_test_server(|ctx| {
+        // Simulate slow handler
+        let delay = ctx.query("delay") || "0";
+        let delay_ms = try? delay.parse::<int>() || 0;
+        time.sleep(delay_ms.milliseconds());
+
+        ctx.json({"delay": delay});
+    });
+
+    let start_time = time.now();
+
+    let results_ch = channel::<bool>();
+
+    // Launch 10 requests: 5 slow (100ms) and 5 fast (10ms)
+    // If not concurrent, total time would be ~550ms
+    // With concurrency, should be ~100ms (max of any single request)
+    for (let i in 0..5) {
+        spawn {
+            // Slow request
+            let result = try? make_request(port, "/test?delay=100");
+            try! results_ch.send(result != nil);
+        }
+        spawn {
+            // Fast request
+            let result = try? make_request(port, "/test?delay=10");
+            try! results_ch.send(result != nil);
+        }
+    }
+
+    // Collect results
+    for (let i in 0..10) {
+        try! results_ch.recv();
+    }
+
+    let elapsed = time.now() - start_time;
+
+    // Should complete in roughly 100-200ms, not 550ms+
+    // Allow some margin for overhead
+    assert elapsed < 300.0;
+}
+
+test "handlers do not block each other" {
+    let port = try! start_test_server(|ctx| {
+        let type = ctx.query("type") || "normal";
+
+        if (type == "slow") {
+            time.sleep(0.2.seconds());
+            ctx.string("slow");
+        } else {
+            ctx.string("fast");
+        }
+    });
+
+    let fast_done_ch = channel::<bool>();
+    let slow_done_ch = channel::<bool>();
+
+    // Start slow request
+    spawn {
+        try! make_request(port, "/test?type=slow");
+        try! slow_done_ch.send(true);
+    }
+
+    // Give slow request time to start
+    time.sleep(0.05.seconds());
+
+    // Start fast request (should not be blocked by slow one)
+    spawn {
+        try! make_request(port, "/test?type=fast");
+        try! fast_done_ch.send(true);
+    }
+
+    // Fast request should complete first
+    let fast_result = try! fast_done_ch.recv();
+    assert_eq fast_result, true;
+
+    // Slow request should complete later
+    let slow_result = try! slow_done_ch.recv();
+    assert_eq slow_result, true;
+}
+
+// ============================================
+// Error handling tests
+// ============================================
+
+test "handle 404 not found" {
+    let port = try! start_test_server(|ctx| {
+        ctx.string("found");
+    });
+
+    let response = try! make_request(port, "/nonexistent");
+
+    assert response.contains("404");
+}
+
+test "handle malformed request" {
+    let app = Engine.default();
+    let port = 8889;
+
+    spawn {
+        try! app.run(`:${port}`);
+    }
+
+    time.sleep(0.1.seconds());
+
+    let client = try! TcpClient.connect(`localhost:${port}`);
+
+    defer {
+        client.close();
+    }
+
+    // Send malformed request
+    try! client.write("INVALID REQUEST\r\n\r\n".as_bytes());
+
+    let response = try! client.read_to_string();
+
+    // Should get error response (400 or 500)
+    assert response.contains("400") || response.contains("500");
+}
