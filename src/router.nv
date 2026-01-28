@@ -44,6 +44,12 @@ pub struct Router {
     pub routes: [Route],
 }
 
+/// Route builder for fluent configuration
+pub struct RouteBuilder {
+    router: Router,
+    route_index: int,
+}
+
 impl Router {
     /// Create a new empty Router
     pub fn new(): Router {
@@ -58,13 +64,22 @@ impl Router {
     /// * `method` - HTTP method (GET, POST, etc.)
     /// * `path` - Route path (supports :param syntax)
     /// * `handler` - Handler function
-    pub fn add_route(self, method: string, path: string, handler: HandlerFunc) {
+    ///
+    /// # Returns
+    /// RouteBuilder for further configuration
+    pub fn add_route(self, method: string, path: string, handler: HandlerFunc): RouteBuilder {
         let route = Route {
             method: method.to_uppercase(),
             path,
             handler,
         };
+        let index = self.routes.len();
         self.routes.push(route);
+
+        return RouteBuilder {
+            router: self,
+            route_index: index,
+        };
     }
 
     /// Match an incoming request to a route
@@ -130,6 +145,28 @@ impl Router {
         }
 
         return params;
+    }
+}
+
+impl RouteBuilder {
+    /// Mark this route to execute in WorkerPool (parallel, multi-threaded)
+    ///
+    /// Use this for CPU-intensive routes to leverage multiple CPU cores.
+    ///
+    /// # Returns
+    /// Self for chaining
+    ///
+    /// # Example
+    /// ```nv
+    /// app.get("/compute/:n", |ctx| {
+    ///     let n = ctx.param("n").parse::<int>();
+    ///     let result = expensive_computation(n);
+    ///     ctx.json({"result": result});
+    /// }).worker();
+    /// ```
+    pub fn worker(self): RouteBuilder {
+        self.router.routes[self.route_index].worker_mode = WorkerMode.Worker;
+        return self;
     }
 }
 

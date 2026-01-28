@@ -24,10 +24,11 @@
 use std.net.{TcpListener, TcpStream};
 use std.io.{BufReader};
 use config.Config;
-use router.Router;
+use router.{Router, RouteBuilder, WorkerMode, RouteMatch};
 use context.{Context, HandlerFunc};
 use request.Request;
 use response.Response;
+use worker_pool.WorkerPool;
 
 /// Sake web framework engine
 pub struct Engine {
@@ -42,6 +43,9 @@ pub struct Engine {
 
     /// Shutdown channel
     shutdown_ch: channel::<bool>?,
+
+    /// Worker pool for CPU-intensive routes
+    worker_pool: WorkerPool?,
 }
 
 impl Engine {
@@ -58,6 +62,7 @@ impl Engine {
             config,
             middleware: [],
             shutdown_ch: nil,
+            worker_pool: nil,
         };
     }
 
@@ -72,35 +77,44 @@ impl Engine {
     /// * `path` - Route path (supports :param syntax)
     /// * `handler` - Handler function
     ///
+    /// # Returns
+    /// RouteBuilder for further configuration (e.g., .worker())
+    ///
     /// # Example
     /// ```nv
     /// app.get("/users/:id", |ctx| {
     ///     let id = ctx.param("id");
     ///     ctx.json({"id": id});
     /// });
+    ///
+    /// // For CPU-intensive routes:
+    /// app.get("/compute/:n", |ctx| {
+    ///     let result = expensive_computation();
+    ///     ctx.json({"result": result});
+    /// }).worker();
     /// ```
-    pub fn get(self, path: string, handler: HandlerFunc) {
-        self.router.add_route("GET", path, handler);
+    pub fn get(self, path: string, handler: HandlerFunc): RouteBuilder {
+        return self.router.add_route("GET", path, handler);
     }
 
     /// Register a POST route
-    pub fn post(self, path: string, handler: HandlerFunc) {
-        self.router.add_route("POST", path, handler);
+    pub fn post(self, path: string, handler: HandlerFunc): RouteBuilder {
+        return self.router.add_route("POST", path, handler);
     }
 
     /// Register a PUT route
-    pub fn put(self, path: string, handler: HandlerFunc) {
-        self.router.add_route("PUT", path, handler);
+    pub fn put(self, path: string, handler: HandlerFunc): RouteBuilder {
+        return self.router.add_route("PUT", path, handler);
     }
 
     /// Register a DELETE route
-    pub fn delete(self, path: string, handler: HandlerFunc) {
-        self.router.add_route("DELETE", path, handler);
+    pub fn delete(self, path: string, handler: HandlerFunc): RouteBuilder {
+        return self.router.add_route("DELETE", path, handler);
     }
 
     /// Register a PATCH route
-    pub fn patch(self, path: string, handler: HandlerFunc) {
-        self.router.add_route("PATCH", path, handler);
+    pub fn patch(self, path: string, handler: HandlerFunc): RouteBuilder {
+        return self.router.add_route("PATCH", path, handler);
     }
 
     /// Add global middleware
@@ -139,7 +153,11 @@ impl Engine {
         let shutdown_ch = channel::<bool>();
         self.shutdown_ch = shutdown_ch;
 
-        // TODO: Initialize WorkerPool if enabled
+        // Initialize WorkerPool if enabled
+        if (self.config.enable_worker_pool) {
+            let pool_size = self.config.effective_worker_pool_size();
+            self.worker_pool = try WorkerPool.new(pool_size);
+        }
 
         // Start TCP listener
         let listener = try TcpListener.bind(addr);
@@ -192,29 +210,96 @@ impl Engine {
         let route_match = self.router.match(request.method, request.path);
 
         if (let match = route_match) {
-            // Build handler chain: global middleware + route handler
-            let handlers: [HandlerFunc] = [];
+            // Check if this route should use worker pool
+            let use_worker = match.route.worker_mode == WorkerMode.Worker &&
+                            self.config.enable_worker_pool &&
+                            self.worker_pool != nil;
 
-            // Add global middleware
-            for (let mw in self.middleware) {
-                handlers.push(mw);
+            if (use_worker) {
+                // Execute in worker pool
+                try self.handle_worker_execution(stream, request, match);
+            } else {
+                // Execute with spawn (default)
+                try self.handle_spawn_execution(stream, request, match);
             }
-
-            // Add route handler
-            handlers.push(match.route.handler);
-
-            // Create context
-            let ctx = Context.with_handlers(request, handlers, match.params);
-
-            // Execute handler chain
-            try ctx.next();
-
-            // Send response
-            try ctx.response.send(stream);
         } else {
             // No route found - send 404
             let response = Response.not_found();
             try response.send(stream);
+        }
+    }
+
+    /// Handle request execution in spawn mode (concurrent, single-threaded)
+    ///
+    /// # Arguments
+    /// * `stream` - TCP stream
+    /// * `request` - Parsed HTTP request
+    /// * `route_match` - Matched route with parameters
+    fn handle_spawn_execution(
+        self,
+        stream: TcpStream,
+        request: Request,
+        route_match: RouteMatch
+    ) throws {
+        // Build handler chain: global middleware + route handler
+        let handlers: [HandlerFunc] = [];
+
+        // Add global middleware
+        for (let mw in self.middleware) {
+            handlers.push(mw);
+        }
+
+        // Add route handler
+        handlers.push(route_match.route.handler);
+
+        // Create context
+        let ctx = Context.with_handlers(request, handlers, route_match.params);
+
+        // Execute handler chain
+        try ctx.next();
+
+        // Send response
+        try ctx.response.send(stream);
+    }
+
+    /// Handle request execution in worker pool mode (parallel, multi-threaded)
+    ///
+    /// # Arguments
+    /// * `stream` - TCP stream
+    /// * `request` - Parsed HTTP request
+    /// * `route_match` - Matched route with parameters
+    fn handle_worker_execution(
+        self,
+        stream: TcpStream,
+        request: Request,
+        route_match: RouteMatch
+    ) throws {
+        // Serialize context for worker
+        let ctx = Context.with_handlers(request, [], route_match.params);
+        ctx.in_worker = true;
+        ctx.worker_size = self.config.effective_worker_pool_size();
+
+        let worker_ctx = ctx.to_worker_context();
+        let ctx_json = try worker_ctx.to_json();
+
+        // Submit to worker pool
+        if (let pool = self.worker_pool) {
+            let worker_response = try pool.submit(ctx_json, 0);
+
+            // Build response from worker result
+            let response = Response.new();
+            response.status(worker_response.status);
+
+            for (let name, value in worker_response.headers) {
+                response.header(name, value);
+            }
+
+            response.write(worker_response.body);
+
+            // Send response
+            try response.send(stream);
+        } else {
+            throw "Worker pool not initialized";
         }
     }
 
@@ -243,6 +328,11 @@ impl Engine {
     pub fn shutdown(self) throws {
         if (let ch = self.shutdown_ch) {
             try ch.send(true);
+        }
+
+        // Shutdown worker pool if initialized
+        if (let pool = self.worker_pool) {
+            try pool.shutdown();
         }
     }
 }

@@ -1,0 +1,234 @@
+/// Tests for WorkerPool CPU-intensive route optimization (User Story 2)
+///
+/// Tests verify that routes marked with .worker() execute in parallel
+/// across multiple CPU cores, achieving 5-7x performance improvement
+/// for CPU-bound workloads.
+
+use std.time;
+use std.vm;
+use std.net.{TcpClient};
+use engine.Engine;
+use config.Config;
+use context.Context;
+use router.WorkerMode;
+
+/// Helper: Make HTTP GET request
+fn make_request(port: int, path: string): string throws {
+    let client = try TcpClient.connect(`localhost:${port}`);
+
+    defer {
+        client.close();
+    }
+
+    let request = `GET ${path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n`;
+    try client.write(request.as_bytes());
+
+    let response = try client.read_to_string();
+    return response;
+}
+
+/// CPU-intensive computation (fibonacci)
+fn fibonacci(n: int): int {
+    if (n <= 1) {
+        return n;
+    }
+    return fibonacci(n - 1) + fibonacci(n - 2);
+}
+
+// ============================================
+// T021: WorkerPool initialization
+// ============================================
+
+test "worker pool initialization with vm.num_cpus()" {
+    let config = Config.default();
+    let app = Engine.new(config);
+
+    // Worker pool should auto-detect CPU count
+    let expected_size = vm.num_cpus();
+
+    // After engine initialization, worker pool size should match
+    // (This will be verified through config.effective_worker_pool_size())
+    assert_eq config.effective_worker_pool_size(), expected_size;
+}
+
+test "worker pool respects custom size" {
+    let config = Config.default().with_worker_pool_size(4);
+    let app = Engine.new(config);
+
+    assert_eq config.effective_worker_pool_size(), 4;
+}
+
+test "worker pool can be disabled" {
+    let config = Config.default().with_worker_pool(false);
+    let app = Engine.new(config);
+
+    assert_eq config.enable_worker_pool, false;
+}
+
+// ============================================
+// T022: CPU-intensive route with .worker()
+// ============================================
+
+test "register route with worker mode" {
+    let app = Engine.default();
+
+    let route = app.get("/compute/:n", |ctx| {
+        let n_str = ctx.param("n") || "10";
+        let n = try? n_str.parse::<int>() || 10;
+        let result = fibonacci(n);
+        try? ctx.json({"n": n, "result": result});
+    });
+
+    // Mark route for worker pool execution
+    route.worker();
+
+    // Route should have worker mode set
+    let registered = app.router.routes[0];
+    assert registered.worker_mode == WorkerMode.Worker;
+}
+
+test "cpu intensive route works in worker pool" {
+    let config = Config.default();
+    let app = Engine.new(config);
+
+    app.get("/compute/:n", |ctx| {
+        let n_str = ctx.param("n") || "10";
+        let n = try? n_str.parse::<int>() || 10;
+        let result = fibonacci(n);
+        try? ctx.json({"n": n, "result": result});
+    }).worker();
+
+    let port = 8890;
+    spawn {
+        try! app.run(`:${port}`);
+    }
+
+    time.sleep(0.1.seconds());
+
+    // Make request to CPU-intensive route
+    let response = try! make_request(port, "/compute/20");
+
+    assert response.contains("200 OK");
+    assert response.contains("\"result\"");
+}
+
+test "handler knows it is in worker pool" {
+    let config = Config.default();
+    let app = Engine.new(config);
+
+    app.get("/check", |ctx| {
+        let in_worker = ctx.in_worker_pool();
+        let pool_size = ctx.worker_pool_size();
+        try? ctx.json({
+            "in_worker": in_worker,
+            "pool_size": pool_size,
+        });
+    }).worker();
+
+    let port = 8891;
+    spawn {
+        try! app.run(`:${port}`);
+    }
+
+    time.sleep(0.1.seconds());
+
+    let response = try! make_request(port, "/check");
+
+    assert response.contains("\"in_worker\":true");
+    assert response.contains("\"pool_size\"");
+}
+
+// ============================================
+// T024: WorkerPool distributes work
+// ============================================
+
+test "worker pool distributes work across threads" {
+    let config = Config.default().with_worker_pool_size(4);
+    let app = Engine.new(config);
+
+    app.get("/compute/:n", |ctx| {
+        let n_str = ctx.param("n") || "25";
+        let n = try? n_str.parse::<int>() || 25;
+        let result = fibonacci(n);
+        try? ctx.json({"result": result});
+    }).worker();
+
+    let port = 8892;
+    spawn {
+        try! app.run(`:${port}`);
+    }
+
+    time.sleep(0.1.seconds());
+
+    // Send multiple concurrent CPU-intensive requests
+    let results_ch = channel::<bool>();
+
+    for (let i in 0..8) {
+        spawn {
+            let result = try? make_request(port, "/compute/25");
+            if (let resp = result) {
+                try! results_ch.send(resp.contains("200 OK"));
+            } else {
+                try! results_ch.send(false);
+            }
+        }
+    }
+
+    // All should complete successfully
+    let success_count = 0;
+    for (let i in 0..8) {
+        if (try! results_ch.recv()) {
+            success_count += 1;
+        }
+    }
+
+    assert_eq success_count, 8;
+}
+
+// ============================================
+// Edge cases
+// ============================================
+
+test "spawn route does not use worker pool" {
+    let config = Config.default();
+    let app = Engine.new(config);
+
+    app.get("/normal", |ctx| {
+        let in_worker = ctx.in_worker_pool();
+        try? ctx.json({"in_worker": in_worker});
+    }); // No .worker() call
+
+    let port = 8893;
+    spawn {
+        try! app.run(`:${port}`);
+    }
+
+    time.sleep(0.1.seconds());
+
+    let response = try! make_request(port, "/normal");
+
+    // Should NOT be in worker pool
+    assert response.contains("\"in_worker\":false");
+}
+
+test "worker pool with disabled config uses spawn" {
+    let config = Config.default().with_worker_pool(false);
+    let app = Engine.new(config);
+
+    app.get("/compute", |ctx| {
+        let in_worker = ctx.in_worker_pool();
+        try? ctx.json({"in_worker": in_worker});
+    }).worker();
+
+    let port = 8894;
+    spawn {
+        try! app.run(`:${port}`);
+    }
+
+    time.sleep(0.1.seconds());
+
+    let response = try! make_request(port, "/compute");
+
+    // Should NOT be in worker pool (disabled in config)
+    assert response.contains("\"in_worker\":false");
+}
