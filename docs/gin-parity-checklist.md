@@ -38,11 +38,11 @@ Track implementation status of all Gin features in Sake.
 - ✅ Group prefix inheritance
 
 ### Static Files
-- 🔲 Static directory - `app.static("/assets", "./public")`
-- 🔲 StaticFS - Custom file system
-- 🔲 StaticFile - Single file serving
-- 🔲 File caching headers
-- 🔲 Directory listing control
+- ✅ Static directory - `app.static("/assets", "./public")`
+- ✅ StaticFS - Custom file system (via StaticOptions)
+- ✅ StaticFile - Single file serving
+- ✅ File caching headers
+- ✅ Directory listing control
 
 ---
 
@@ -288,9 +288,9 @@ Each feature MUST have:
 ### Phase 3: Router Groups & Static Files
 - ✅ Router groups with prefix
 - ✅ Group middleware
-- 🔲 Static file serving
-- 🔲 StaticFS, StaticFile
-- 🔲 File caching headers
+- ✅ Static file serving
+- ✅ StaticFS, StaticFile
+- ✅ File caching headers
 
 ### Phase 4: Templates
 - 🔲 Template loading
@@ -318,7 +318,7 @@ Each feature MUST have:
 
 ## Completion Metrics
 
-**Current Status:** ~47% complete (51/109 features)
+**Current Status:** ~51% complete (56/109 features)
 
 **Target:** 100% Gin parity by v2.0.0
 

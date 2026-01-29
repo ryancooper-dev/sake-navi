@@ -1,0 +1,103 @@
+/// Static Files Example
+///
+/// Demonstrates serving static files and directories.
+
+use sake.Engine;
+use sake.Context;
+use sake.static.StaticOptions;
+
+fn main() throws {
+    let app = Engine.new();
+
+    // Home page
+    app.get("/", |ctx| {
+        ctx.html(`
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>Sake Static Files Demo</title>
+                <link rel="stylesheet" href="/assets/style.css">
+            </head>
+            <body>
+                <h1>🍶 Sake Static Files</h1>
+                <p>This demo shows static file serving capabilities.</p>
+
+                <h2>Available Routes</h2>
+                <ul>
+                    <li><a href="/assets/style.css">/assets/style.css</a> - CSS file</li>
+                    <li><a href="/assets/app.js">/assets/app.js</a> - JavaScript file</li>
+                    <li><a href="/assets/logo.png">/assets/logo.png</a> - Image file</li>
+                    <li><a href="/favicon.ico">/favicon.ico</a> - Single file</li>
+                    <li><a href="/files/">/files/</a> - File browser (with directory listing)</li>
+                </ul>
+
+                <h2>Features</h2>
+                <ul>
+                    <li>✅ Automatic MIME type detection</li>
+                    <li>✅ Cache headers (configurable)</li>
+                    <li>✅ Security: Directory traversal prevention</li>
+                    <li>✅ Index file support (index.html)</li>
+                    <li>✅ Custom options per directory</li>
+                </ul>
+
+                <script src="/assets/app.js"></script>
+            </body>
+            </html>
+        `);
+    });
+
+    // Serve static assets
+    // URL: /assets/* -> ./public/*
+    app.static("/assets", "./public");
+
+    // Serve single file
+    app.static_file("/favicon.ico", "./public/favicon.ico");
+
+    // Serve files with custom options
+    let file_opts = StaticOptions.default()
+        .with_directory_listing(true)     // Enable directory listing
+        .with_cache(true, 7200);          // Cache for 2 hours
+
+    app.static_with_options("/files", "./uploads", file_opts);
+
+    // Serve downloads with different cache settings
+    let download_opts = StaticOptions.default()
+        .with_cache(false, 0);            // No caching for downloads
+
+    app.static_with_options("/downloads", "./downloads", download_opts);
+
+    // API route for testing
+    app.get("/api/files", |ctx| {
+        ctx.json({
+            "static_routes": [
+                {"path": "/assets/*", "root": "./public"},
+                {"path": "/files/*", "root": "./uploads"},
+                {"path": "/downloads/*", "root": "./downloads"},
+            ]
+        });
+    });
+
+    // Start server
+    println("🍶 Sake server with static file serving");
+    println("");
+    println("Setup:");
+    println("  mkdir -p public uploads downloads");
+    println("  echo 'body { font-family: sans-serif; }' > public/style.css");
+    println("  echo 'console.log(\"Sake loaded\");' > public/app.js");
+    println("  echo 'test' > uploads/test.txt");
+    println("");
+    println("Routes:");
+    println("  GET  /                    - Home page");
+    println("  GET  /assets/*            - Static assets (./public/)");
+    println("  GET  /files/*             - File browser (./uploads/)");
+    println("  GET  /downloads/*         - Downloads (no cache)");
+    println("  GET  /favicon.ico         - Single file");
+    println("  GET  /api/files           - File listing API");
+    println("");
+    println("Try:");
+    println("  curl http://localhost:8080/");
+    println("  curl http://localhost:8080/assets/style.css");
+    println("  curl -I http://localhost:8080/assets/app.js  # Check cache headers");
+
+    try app.run(":8080");
+}

@@ -32,6 +32,7 @@ use request.Request;
 use response.Response;
 use router.{Router, RouterGroup, RouteMatch};
 use worker_pool.{WorkerPoolConfig, WorkerPoolRuntime};
+use static.{StaticHandler, StaticOptions};
 
 /// Sake Engine configuration
 pub struct EngineConfig {
@@ -191,6 +192,64 @@ impl Engine {
     /// ```
     pub fn group(self, prefix: string): RouterGroup {
         return self.router.group(prefix);
+    }
+
+    /// Serve static files from a directory
+    ///
+    /// # Arguments
+    /// * `url_path` - URL path to serve files from (e.g., "/static")
+    /// * `root` - Local directory path (e.g., "./public")
+    ///
+    /// # Example
+    /// ```nv
+    /// let app = Engine.new();
+    /// app.static("/assets", "./public");
+    /// // Now /assets/style.css serves ./public/style.css
+    /// ```
+    pub fn static(self, url_path: string, root: string) {
+        let handler = StaticHandler.new(root, url_path);
+        let pattern = url_path + "/*filepath";
+
+        self.get(pattern, |ctx: Context| {
+            handler.serve(ctx);
+        });
+    }
+
+    /// Serve static files with custom options
+    ///
+    /// # Arguments
+    /// * `url_path` - URL path to serve files from
+    /// * `root` - Local directory path
+    /// * `options` - Static serving options
+    ///
+    /// # Example
+    /// ```nv
+    /// let opts = StaticOptions.default()
+    ///     .with_directory_listing(true)
+    ///     .with_cache(true, 7200);
+    /// app.static_with_options("/files", "./uploads", opts);
+    /// ```
+    pub fn static_with_options(self, url_path: string, root: string, options: StaticOptions) {
+        let handler = StaticHandler.new(root, url_path).with_options(options);
+        let pattern = url_path + "/*filepath";
+
+        self.get(pattern, |ctx: Context| {
+            handler.serve(ctx);
+        });
+    }
+
+    /// Serve a single static file
+    ///
+    /// # Arguments
+    /// * `url_path` - URL path (e.g., "/favicon.ico")
+    /// * `file_path` - Local file path (e.g., "./public/favicon.ico")
+    ///
+    /// # Example
+    /// ```nv
+    /// app.static_file("/favicon.ico", "./public/favicon.ico");
+    /// ```
+    pub fn static_file(self, url_path: string, file_path: string) {
+        self.get(url_path, static.serve_file(file_path));
     }
 
     // ============================================
@@ -501,4 +560,24 @@ test "engine group with middleware" {
     let match_result = app.router.match("GET", "/api/protected");
     assert match_result != nil;
     assert_eq match_result!.route.middleware.len(), 1;
+}
+
+test "static file serving setup" {
+    let app = Engine.new();
+
+    app.static("/assets", "./public");
+
+    // Should register wildcard route
+    let match_result = app.router.match("GET", "/assets/style.css");
+    assert match_result != nil;
+    assert match_result!.params.get("filepath") == "style.css";
+}
+
+test "static file route" {
+    let app = Engine.new();
+
+    app.static_file("/favicon.ico", "./public/favicon.ico");
+
+    let match_result = app.router.match("GET", "/favicon.ico");
+    assert match_result != nil;
 }
