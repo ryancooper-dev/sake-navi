@@ -8,13 +8,13 @@ Implement all core Gin features with idiomatic Navi code while maintaining high 
 ## 📊 Progress Overview
 
 - **Core Routing**: 100% (10/10) ✅
-- **Context API**: 70% (14/20)
+- **Context API**: 95% (19/20)
 - **Middleware**: 100% (10/10) ✅
-- **Request Binding**: 20% (2/10)
+- **Request Binding**: 80% (8/10)
 - **Response Rendering**: 80% (8/10)
 - **Advanced Features**: 35% (3.5/10)
 
-**Overall Progress**: ~73%
+**Overall Progress**: ~87%
 
 ---
 
@@ -64,10 +64,10 @@ Implement all core Gin features with idiomatic Navi code while maintaining high 
 
 ### Request Binding
 - [x] `bind_json::<T>()` - Parse JSON body
-- [ ] `bind_form::<T>()` - Parse form data
-- [ ] `bind_uri::<T>()` - Parse URI parameters
-- [ ] `bind_header::<T>()` - Parse headers
-- [ ] `bind_query::<T>()` - Parse query string
+- [x] `bind_form()` - Parse form data
+- [x] `bind_uri()` - Parse URI parameters
+- [x] `bind_header()` - Parse headers
+- [x] `bind_query()` - Parse query string
 - [ ] `should_bind::<T>()` - Bind with validation
 
 ### Response Methods
@@ -95,9 +95,9 @@ Implement all core Gin features with idiomatic Navi code while maintaining high 
 - [x] `get_int(key)` - Get as int
 - [x] `get_bool(key)` - Get as bool
 - [x] `get_float(key)` - Get as float
-- [ ] `must_get(key)` - Get or throw
+- [x] `must_get(key)` - Get or throw
 
-**Status**: 🟢 Mostly Complete (core features done)
+**Status**: ✅ Complete
 
 **Priority**: P0 (Core functionality)
 
@@ -134,11 +134,11 @@ Implement all core Gin features with idiomatic Navi code while maintaining high 
 
 ### Binding Sources
 - [x] JSON body
-- [ ] Form data (application/x-www-form-urlencoded)
+- [x] Form data (application/x-www-form-urlencoded)
 - [ ] Multipart form (multipart/form-data)
-- [ ] Query string
-- [ ] URI parameters
-- [ ] Headers
+- [x] Query string
+- [x] URI parameters
+- [x] Headers
 - [ ] File uploads
 
 ### Validation
@@ -148,11 +148,11 @@ Implement all core Gin features with idiomatic Navi code while maintaining high 
 - [ ] Custom validators
 - [ ] Validation error messages
 
-**Status**: 🔴 Not Started
+**Status**: 🟢 Core features complete (validation pending)
 
 **Priority**: P1 (Common use cases)
 
-**Tests**: `tests/test_binding.nv` (missing)
+**Tests**: Inline tests in `sake/context.nv` (6 binding tests), `examples/binding.nv`
 
 ---
 
@@ -282,5 +282,5 @@ Each feature must have:
 ---
 
 **Last Updated**: 2026-01-28
-**Current Version**: v0.5.0 (File Serving & Static Assets)
+**Current Version**: v0.6.0 (Request Binding)
 **Next Version**: v1.0.0 (Production Ready)
