@@ -1,0 +1,131 @@
+/// Basic Sake Server Example
+///
+/// Demonstrates basic usage of Sake framework with routes,
+/// middleware, and optional WorkerPool support.
+///
+/// Run: navi run examples/basic_server.nv
+
+use sake.Engine;
+
+fn main() throws {
+    let app = Engine.with_workers(4);
+
+    // Global middleware: Logger
+    app.use(|ctx| {
+        let start = time.now();
+        println(`[${time.format(start)}] ${ctx.method()} ${ctx.path()}`);
+
+        try ctx.next();
+
+        let duration = time.now() - start;
+        println(`   -> ${ctx.response.status_code} (${duration}ms)`);
+    });
+
+    // Basic routes
+    app.get("/", |ctx| {
+        ctx.json({
+            "message": "Welcome to Sake! 🍶",
+            "version": "0.1.0",
+        });
+    });
+
+    app.get("/health", |ctx| {
+        ctx.json({
+            "status": "ok",
+            "timestamp": time.now(),
+        });
+    });
+
+    // Route with path parameters
+    app.get("/users/:id", |ctx| {
+        let id = ctx.param("id") || "unknown";
+        ctx.json({
+            "user_id": id,
+            "name": `User ${id}`,
+        });
+    });
+
+    // Route with query parameters
+    app.get("/search", |ctx| {
+        let query = ctx.query("q") || "";
+        let page = ctx.query("page") || "1";
+
+        ctx.json({
+            "query": query,
+            "page": page,
+            "results": [],
+        });
+    });
+
+    // POST route
+    app.post("/users", |ctx| {
+        let body = ctx.body();
+
+        ctx.status(201).json({
+            "message": "User created",
+            "data": body,
+        });
+    });
+
+    // CPU-intensive route using WorkerPool
+    app.get("/compute/:n", |ctx| {
+        let n_str = ctx.param("n") || "0";
+        let n = try? n_str.parse::<int>() || 0;
+
+        // Simulate heavy computation
+        let result = fibonacci(n);
+
+        ctx.json({
+            "input": n,
+            "result": result,
+            "worker": "WorkerPool",
+        });
+    }).worker();  // Mark as CPU-intensive
+
+    // Normal route (without WorkerPool)
+    app.get("/light/:n", |ctx| {
+        let n_str = ctx.param("n") || "0";
+        let n = try? n_str.parse::<int>() || 0;
+
+        let result = n * 2;
+
+        ctx.json({
+            "input": n,
+            "result": result,
+            "worker": "spawn",
+        });
+    });
+
+    // Static file simulation
+    app.get("/static/*filepath", |ctx| {
+        let filepath = ctx.param("filepath") || "index.html";
+
+        ctx.string(`Serving static file: ${filepath}`);
+    });
+
+    // Error handling example
+    app.get("/error", |ctx| {
+        throw "Intentional error for testing";
+    });
+
+    // 404 handler (built-in)
+
+    println("Starting Sake server...");
+    println("Try:");
+    println("  curl http://localhost:8080/");
+    println("  curl http://localhost:8080/users/123");
+    println("  curl http://localhost:8080/search?q=sake&page=2");
+    println("  curl http://localhost:8080/compute/10");
+    println("  curl http://localhost:8080/light/10");
+    println("");
+
+    try app.run(":8080");
+}
+
+/// Calculate Fibonacci number (CPU-intensive)
+fn fibonacci(n: int): int {
+    if (n <= 1) {
+        return n;
+    }
+    return fibonacci(n - 1) + fibonacci(n - 2);
+}
