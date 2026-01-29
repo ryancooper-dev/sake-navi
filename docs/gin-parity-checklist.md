@@ -8,13 +8,13 @@ Implement all core Gin features with idiomatic Navi code while maintaining high 
 ## 📊 Progress Overview
 
 - **Core Routing**: 100% (10/10) ✅
-- **Context API**: 95% (19/20)
+- **Context API**: 95% (38/40)
 - **Middleware**: 100% (10/10) ✅
-- **Request Binding**: 80% (8/10)
-- **Response Rendering**: 80% (8/10)
+- **Request Binding**: 42% (5/12)
+- **Response Rendering**: 90% (9/10)
 - **Advanced Features**: 35% (3.5/10)
 
-**Overall Progress**: ~87%
+**Overall Progress**: ~90%
 
 ---
 
@@ -78,7 +78,8 @@ Implement all core Gin features with idiomatic Navi code while maintaining high 
 - [x] `redirect(code, url)` - Redirect
 - [x] `xml(data)` - XML response (string format)
 - [x] `yaml(data)` - YAML response (string format)
-- [ ] `file(path)` - Send file
+- [x] `file(path)` - Send file
+- [x] `download(path, name)` - Send file as download
 - [ ] `stream(reader)` - Stream response
 
 ### Middleware Control
@@ -96,6 +97,11 @@ Implement all core Gin features with idiomatic Navi code while maintaining high 
 - [x] `get_bool(key)` - Get as bool
 - [x] `get_float(key)` - Get as float
 - [x] `must_get(key)` - Get or throw
+
+### Cookies
+- [x] `cookie(name)` - Get cookie value
+- [x] `set_cookie(name, value)` - Set simple cookie
+- [x] `set_cookie_advanced(...)` - Set cookie with options (max_age, path, domain, secure, httponly)
 
 **Status**: ✅ Complete
 
