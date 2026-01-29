@@ -1,0 +1,168 @@
+/// Request Binding Example
+///
+/// Demonstrates all binding methods for parsing request data:
+/// - bind_query(): Query string parameters
+/// - bind_form(): URL-encoded form data
+/// - bind_uri(): Path parameters
+/// - bind_header(): HTTP headers
+
+use sake.Engine;
+
+fn main() throws {
+    let app = Engine.with_defaults();
+
+    // Example 1: bind_query() - Parse query string parameters
+    // GET /search?q=navi&category=web&limit=20
+    app.get("/search", |ctx| {
+        let params = ctx.bind_query();
+        let query = params.get("q") || "";
+        let category = params.get("category") || "all";
+        let limit = params.get("limit") || "10";
+
+        try? ctx.json({
+            "query": query,
+            "category": category,
+            "limit": limit,
+            "results": [],
+        });
+    });
+
+    // Example 2: bind_form() - Parse form data
+    // POST /login
+    // Content-Type: application/x-www-form-urlencoded
+    // Body: username=alice&password=secret123
+    app.post("/login", |ctx| {
+        let form_result = try? ctx.bind_form();
+
+        if (let form = form_result) {
+            let username = form.get("username") || "";
+            let password = form.get("password") || "";
+
+            // Validate credentials (dummy check)
+            if (username == "alice" && password == "secret123") {
+                ctx.status(200);
+                try? ctx.json({
+                    "success": true,
+                    "message": "Login successful",
+                    "user": username,
+                });
+            } else {
+                ctx.status(401);
+                try? ctx.json({
+                    "success": false,
+                    "message": "Invalid credentials",
+                });
+            }
+        } else {
+            ctx.abort_with_error(400, "Invalid form data");
+        }
+    });
+
+    // Example 3: bind_uri() - Parse path parameters
+    // GET /users/123/posts/456
+    app.get("/users/:user_id/posts/:post_id", |ctx| {
+        let params = ctx.bind_uri();
+        let user_id = params.get("user_id") || "0";
+        let post_id = params.get("post_id") || "0";
+
+        try? ctx.json({
+            "user_id": user_id,
+            "post_id": post_id,
+            "title": "Sample Post",
+            "author": `User ${user_id}`,
+        });
+    });
+
+    // Example 4: bind_header() - Parse request headers
+    // Useful for authentication, content negotiation, etc.
+    app.get("/api/info", |ctx| {
+        let headers = ctx.bind_header();
+        let user_agent = headers.get("user-agent") || "Unknown";
+        let accept = headers.get("accept") || "*/*";
+        let auth = headers.get("authorization") || "None";
+
+        try? ctx.json({
+            "user_agent": user_agent,
+            "accept": accept,
+            "has_auth": auth != "None",
+        });
+    });
+
+    // Example 5: Combined usage - RESTful API with multiple bindings
+    // POST /api/v1/products?draft=true
+    // Authorization: Bearer token123
+    // Content-Type: application/x-www-form-urlencoded
+    // Body: name=Widget&price=29.99
+    app.post("/api/:version/products", |ctx| {
+        // Get API version from URI
+        let uri_params = ctx.bind_uri();
+        let version = uri_params.get("version") || "v1";
+
+        // Get draft flag from query string
+        let query_params = ctx.bind_query();
+        let is_draft = query_params.get("draft") == "true";
+
+        // Get auth token from headers
+        let headers = ctx.bind_header();
+        let auth = headers.get("authorization") || "";
+
+        // Validate authentication
+        if (!auth.starts_with("Bearer ")) {
+            ctx.abort_with_error(401, "Missing or invalid authorization");
+            return;
+        }
+
+        // Parse product data from form
+        let form_result = try? ctx.bind_form();
+        if (let form = form_result) {
+            let name = form.get("name") || "";
+            let price = form.get("price") || "0";
+
+            // Create product response
+            ctx.status(201);
+            try? ctx.json({
+                "api_version": version,
+                "product": {
+                    "name": name,
+                    "price": price,
+                    "draft": is_draft,
+                },
+                "message": "Product created successfully",
+            });
+        } else {
+            ctx.abort_with_error(400, "Invalid product data");
+        }
+    });
+
+    // Example 6: Default values pattern
+    app.get("/articles", |ctx| {
+        let query = ctx.bind_query();
+
+        // Get with defaults
+        let page = query.get("page") || "1";
+        let limit = query.get("limit") || "10";
+        let sort = query.get("sort") || "created_at";
+        let order = query.get("order") || "desc";
+
+        try? ctx.json({
+            "page": page,
+            "limit": limit,
+            "sort": sort,
+            "order": order,
+            "articles": [],
+        });
+    });
+
+    println("Request Binding Example Server");
+    println("===============================");
+    println("");
+    println("Try these examples:");
+    println("  GET  http://localhost:8080/search?q=navi&category=web");
+    println("  POST http://localhost:8080/login (form: username=alice&password=secret123)");
+    println("  GET  http://localhost:8080/users/123/posts/456");
+    println("  GET  http://localhost:8080/api/info");
+    println("  GET  http://localhost:8080/articles?page=2&limit=20&sort=title");
+    println("");
+
+    try app.run(":8080");
+}
