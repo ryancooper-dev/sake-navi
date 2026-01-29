@@ -1,66 +1,61 @@
-/// CORS Middleware
+/// CORS middleware for Cross-Origin Resource Sharing
 ///
-/// Adds Cross-Origin Resource Sharing (CORS) headers to responses.
-///
-/// # Example
-/// ```nv
-/// use sake.middleware.cors;
-///
-/// app.use(cors_default());
-/// ```
+/// Handles CORS preflight requests and adds appropriate headers
+/// to allow cross-origin requests from browsers.
 
-use context.{Context, HandlerFunc};
+use sake.context.{Context, HandlerFunc};
 
-/// CORS configuration
+/// CORS middleware configuration
 pub struct CorsConfig {
-    /// Allowed origins (* for all)
-    allowed_origins: [string],
+    /// Allowed origins (use "*" for all)
+    pub allowed_origins: [string] = ["*"],
 
     /// Allowed HTTP methods
-    allowed_methods: [string],
+    pub allowed_methods: [string] = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
 
     /// Allowed headers
-    allowed_headers: [string],
+    pub allowed_headers: [string] = ["Origin", "Content-Type", "Accept", "Authorization"],
 
     /// Whether to allow credentials
-    allow_credentials: bool,
+    pub allow_credentials: bool = false,
 
-    /// Max age for preflight cache
-    max_age: int,
+    /// Max age for preflight cache (seconds)
+    pub max_age: int = 3600,
+
+    /// Exposed headers
+    pub exposed_headers: [string] = [],
 }
 
 impl CorsConfig {
-    /// Create default CORS configuration (permissive)
-    pub fn default(): CorsConfig {
+    /// Create default CORS configuration
+    ///
+    /// Allows all origins, common methods and headers.
+    pub fn with_defaults(): CorsConfig {
         return CorsConfig {
             allowed_origins: ["*"],
-            allowed_methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-            allowed_headers: ["*"],
+            allowed_methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+            allowed_headers: ["Origin", "Content-Type", "Accept", "Authorization"],
             allow_credentials: false,
             max_age: 3600,
+            exposed_headers: [],
         };
     }
 
-    /// Create restrictive CORS configuration
-    pub fn restrictive(): CorsConfig {
-        return CorsConfig {
-            allowed_origins: [],
-            allowed_methods: ["GET", "POST"],
-            allowed_headers: ["Content-Type"],
-            allow_credentials: false,
-            max_age: 3600,
-        };
-    }
-
-    /// Add allowed origin
-    pub fn allow_origin(self, origin: string): CorsConfig {
-        self.allowed_origins.push(origin);
+    /// Set allowed origins
+    pub fn with_origins(self, origins: [string]): CorsConfig {
+        self.allowed_origins = origins;
         return self;
     }
 
-    /// Add allowed method
-    pub fn allow_method(self, method: string): CorsConfig {
-        self.allowed_methods.push(method);
+    /// Set allowed methods
+    pub fn with_methods(self, methods: [string]): CorsConfig {
+        self.allowed_methods = methods;
+        return self;
+    }
+
+    /// Set allowed headers
+    pub fn with_headers(self, headers: [string]): CorsConfig {
+        self.allowed_headers = headers;
         return self;
     }
 
@@ -69,128 +64,167 @@ impl CorsConfig {
         self.allow_credentials = true;
         return self;
     }
+
+    /// Set max age
+    pub fn with_max_age(self, seconds: int): CorsConfig {
+        self.max_age = seconds;
+        return self;
+    }
+
+    /// Set exposed headers
+    pub fn with_exposed_headers(self, headers: [string]): CorsConfig {
+        self.exposed_headers = headers;
+        return self;
+    }
 }
 
 /// Create CORS middleware with default configuration
 ///
-/// Allows all origins and common methods.
-///
 /// # Example
 /// ```nv
-/// app.use(cors_default());
+/// app.use(cors());
 /// ```
-pub fn cors_default(): HandlerFunc {
-    return cors(CorsConfig.default());
+pub fn cors(): HandlerFunc {
+    return cors_with_config(CorsConfig.with_defaults());
 }
 
 /// Create CORS middleware with custom configuration
 ///
-/// # Arguments
-/// * `config` - CORS configuration
-///
 /// # Example
 /// ```nv
-/// let config = CorsConfig.restrictive()
-///     .allow_origin("https://example.com")
-///     .allow_method("GET")
-///     .allow_method("POST");
-///
-/// app.use(cors(config));
+/// let config = CorsConfig.with_defaults()
+///     .with_origins(["https://example.com"])
+///     .with_credentials();
+/// app.use(cors_with_config(config));
 /// ```
-pub fn cors(config: CorsConfig): HandlerFunc {
-    return |ctx: Context| {
-        // Set CORS headers
-        let origin = ctx.header("Origin") || "*";
+pub fn cors_with_config(config: CorsConfig): HandlerFunc {
+    return |ctx| {
+        let origin = ctx.header("origin") || "";
 
         // Check if origin is allowed
-        let allowed = config.allowed_origins.contains("*") ||
-                     config.allowed_origins.contains(origin);
+        let origin_allowed = is_origin_allowed(origin, config.allowed_origins);
 
-        if (allowed) {
-            ctx.set_header("Access-Control-Allow-Origin", origin);
+        if (origin_allowed) {
+            // Set CORS headers
+            if (config.allowed_origins.len() == 1 && config.allowed_origins[0] == "*") {
+                ctx.set_header("Access-Control-Allow-Origin", "*");
+            } else {
+                ctx.set_header("Access-Control-Allow-Origin", origin);
+            }
 
             if (config.allow_credentials) {
                 ctx.set_header("Access-Control-Allow-Credentials", "true");
             }
 
-            // Handle preflight OPTIONS request
-            if (ctx.method() == "OPTIONS") {
-                let methods = config.allowed_methods.join(", ");
-                let headers = config.allowed_headers.join(", ");
-
-                ctx.set_header("Access-Control-Allow-Methods", methods);
-                ctx.set_header("Access-Control-Allow-Headers", headers);
-                ctx.set_header("Access-Control-Max-Age", config.max_age.to_string());
-
-                ctx.status(204);
-                ctx.abort();
-                return;
+            if (config.exposed_headers.len() > 0) {
+                ctx.set_header("Access-Control-Expose-Headers", config.exposed_headers.join(", "));
             }
         }
 
+        // Handle preflight request
+        if (ctx.method() == "OPTIONS") {
+            if (origin_allowed) {
+                ctx.set_header("Access-Control-Allow-Methods", config.allowed_methods.join(", "));
+                ctx.set_header("Access-Control-Allow-Headers", config.allowed_headers.join(", "));
+                ctx.set_header("Access-Control-Max-Age", `${config.max_age}`);
+            }
+
+            ctx.status(204);
+            ctx.abort();
+            return;
+        }
+
+        // Continue to next handler
         try ctx.next();
     };
+}
+
+/// Check if origin is allowed
+fn is_origin_allowed(origin: string, allowed: [string]): bool {
+    if (allowed.len() == 1 && allowed[0] == "*") {
+        return true;
+    }
+
+    for (let allowed_origin in allowed) {
+        if (origin == allowed_origin) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 // ============================================
 // Tests
 // ============================================
 
-test "cors default allows all origins" {
-    use request.Request;
+use sake.request.Request;
 
-    let req = try! Request.parse("GET / HTTP/1.1\r\nHost: localhost\r\nOrigin: https://example.com\r\n\r\n");
+test "cors allows all origins by default" {
+    let request = try! Request.parse("GET /test HTTP/1.1\r\nOrigin: https://example.com\r\n\r\n");
 
-    let test_handler = |ctx: Context| {
-        ctx.status(200).string("OK");
+    let handler = |ctx| {
+        ctx.string("OK");
     };
 
-    let handlers = [cors_default(), test_handler];
-    let ctx = Context.with_handlers(req, handlers, {:});
-
+    let ctx = Context.with_handlers(request, [cors(), handler], {:});
     try! ctx.next();
 
-    let cors_header = ctx.response.get_header("Access-Control-Allow-Origin");
-    assert cors_header != nil;
+    let response_text = ctx.response.build();
+    assert response_text.contains("Access-Control-Allow-Origin: *");
 }
 
-test "cors handles preflight OPTIONS" {
-    use request.Request;
+test "cors handles preflight request" {
+    let request = try! Request.parse("OPTIONS /test HTTP/1.1\r\nOrigin: https://example.com\r\n\r\n");
 
-    let req = try! Request.parse("OPTIONS / HTTP/1.1\r\nHost: localhost\r\nOrigin: https://example.com\r\n\r\n");
-
-    let test_handler = |ctx: Context| {
-        ctx.status(200).string("Should not reach");
+    let handler = |ctx| {
+        ctx.string("Should not reach here");
     };
 
-    let handlers = [cors_default(), test_handler];
-    let ctx = Context.with_handlers(req, handlers, {:});
-
+    let ctx = Context.with_handlers(request, [cors(), handler], {:});
     try! ctx.next();
 
-    // Preflight should return 204 and abort
-    assert_eq ctx.response.status_code, 204;
-    assert_eq ctx.is_aborted(), true;
+    // Preflight should abort chain
+    assert ctx.is_aborted();
+
+    let response_text = ctx.response.build();
+    assert response_text.contains("204");
+    assert response_text.contains("Access-Control-Allow-Methods");
 }
 
-test "cors restrictive blocks unknown origins" {
-    use request.Request;
+test "cors config with specific origins" {
+    let config = CorsConfig.with_defaults()
+        .with_origins(["https://example.com", "https://test.com"]);
 
-    let config = CorsConfig.restrictive()
-        .allow_origin("https://allowed.com");
+    assert_eq config.allowed_origins.len(), 2;
+    assert_eq config.allowed_origins[0], "https://example.com";
+}
 
-    let req = try! Request.parse("GET / HTTP/1.1\r\nHost: localhost\r\nOrigin: https://blocked.com\r\n\r\n");
+test "cors config with credentials" {
+    let config = CorsConfig.with_defaults().with_credentials();
 
-    let test_handler = |ctx: Context| {
-        ctx.status(200).string("OK");
-    };
+    assert_eq config.allow_credentials, true;
+}
 
-    let handlers = [cors(config), test_handler];
-    let ctx = Context.with_handlers(req, handlers, {:});
+test "cors allows specific origin" {
+    let request = try! Request.parse("GET /test HTTP/1.1\r\nOrigin: https://example.com\r\n\r\n");
 
+    let config = CorsConfig.with_defaults().with_origins(["https://example.com"]);
+    let handler = |ctx| { ctx.string("OK"); };
+
+    let ctx = Context.with_handlers(request, [cors_with_config(config), handler], {:});
     try! ctx.next();
 
-    // Should not have CORS header for blocked origin
-    let cors_header = ctx.response.get_header("Access-Control-Allow-Origin");
-    assert_eq cors_header, nil;
+    let response_text = ctx.response.build();
+    assert response_text.contains("Access-Control-Allow-Origin: https://example.com");
+}
+
+test "is_origin_allowed with wildcard" {
+    assert is_origin_allowed("https://example.com", ["*"]);
+    assert is_origin_allowed("https://test.com", ["*"]);
+}
+
+test "is_origin_allowed with specific origins" {
+    assert is_origin_allowed("https://example.com", ["https://example.com", "https://test.com"]);
+    assert !is_origin_allowed("https://other.com", ["https://example.com", "https://test.com"]);
 }

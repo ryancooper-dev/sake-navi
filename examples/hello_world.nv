@@ -1,0 +1,43 @@
+/// Hello World Example
+/// 
+/// Demonstrates basic Sake usage with spawn mode (concurrent I/O handling)
+
+use sake.Engine;
+
+fn main() throws {
+    let app = Engine.with_defaults();
+
+    // Simple text response
+    app.get("/", |ctx| {
+        ctx.string("Hello, Sake! 🍶");
+    });
+
+    // JSON response
+    app.get("/api/hello", |ctx| {
+        try? ctx.json({
+            "message": "Hello from Sake!",
+            "version": "0.1.0",
+        });
+    });
+
+    // Route with path parameter
+    app.get("/greet/:name", |ctx| {
+        let name = ctx.param("name") || "World";
+        ctx.string(`Hello, ${name}!`);
+    });
+
+    // Route with query parameters
+    app.get("/search", |ctx| {
+        let query = ctx.query("q") || "";
+        let page = ctx.query("page") || "1";
+
+        try? ctx.json({
+            "query": query,
+            "page": page,
+            "results": [],
+        });
+    });
+
+    println("Starting Hello World server...");
+    try app.run(":8080");
+}

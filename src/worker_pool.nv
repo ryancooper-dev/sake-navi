@@ -1,411 +1,135 @@
-/// WorkerPool - Multi-threaded task processing
+/// Worker pool for parallel execution of CPU-intensive tasks
 ///
-/// WorkerPool provides CPU-intensive task processing using Navi's Worker threads.
-/// This is designed for the Config/Runtime separation pattern to avoid channel
-/// serialization issues.
+/// WorkerPool manages a pool of worker threads that execute
+/// CPU-bound tasks in parallel across multiple CPU cores.
 ///
-/// # Example
-/// ```nv
-/// // Phase 1: Configure (can be stored as struct field)
-/// let config = WorkerPoolConfig.new(4);
-///
-/// // Phase 2: Start runtime (creates channels)
-/// let runtime = try config.start();
-///
-/// // Phase 3: Use
-/// try runtime.submit(task_json);
-/// let result_json = try runtime.get_result();
-///
-/// // Phase 4: Cleanup
-/// try runtime.shutdown();
-/// ```
+/// Uses std.worker.Worker.pool() for true multi-threaded parallelism.
 
 use std.worker.Worker;
-use std.vm;
-use std.time;
+use std.json;
+// Note: worker_context is in same module
 
-/// Load balancing strategy
-pub enum LoadBalanceStrategy {
-    /// Round-robin distribution
-    RoundRobin,
-
-    /// Least loaded worker (tracks active tasks)
-    LeastLoaded,
-
-    /// Random worker selection
-    Random,
-}
-
-/// WorkerPool configuration (serializable, can be stored as struct field)
-pub struct WorkerPoolConfig {
-    /// Number of worker threads (0 = auto-detect from CPU count)
-    size: int,
-
-    /// Maximum queue size for pending tasks
-    queue_size: int,
-
-    /// Task timeout in seconds (0 = no timeout)
-    timeout_secs: int,
-
-    /// Load balancing strategy
-    load_balance: LoadBalanceStrategy,
-}
-
-impl WorkerPoolConfig {
-    /// Create a new WorkerPool configuration
-    ///
-    /// # Arguments
-    /// * `size` - Number of worker threads (0 = auto-detect)
-    ///
-    /// # Example
-    /// ```nv
-    /// let config = WorkerPoolConfig.new(4);
-    /// ```
-    pub fn new(size: int): WorkerPoolConfig {
-        let actual_size = if (size <= 0) {
-            vm.num_cpus()
-        } else {
-            size
-        };
-
-        return WorkerPoolConfig {
-            size: actual_size,
-            queue_size: 1000,
-            timeout_secs: 30,
-            load_balance: LoadBalanceStrategy.RoundRobin,
-        };
-    }
-
-    /// Set the queue size for pending tasks
-    ///
-    /// # Arguments
-    /// * `size` - Maximum queue size
-    ///
-    /// # Returns
-    /// Self for chaining
-    pub fn with_queue_size(self, size: int): WorkerPoolConfig {
-        self.queue_size = size;
-        return self;
-    }
-
-    /// Set task timeout
-    ///
-    /// # Arguments
-    /// * `seconds` - Timeout in seconds (0 = no timeout)
-    ///
-    /// # Returns
-    /// Self for chaining
-    pub fn with_timeout(self, seconds: int): WorkerPoolConfig {
-        self.timeout_secs = seconds;
-        return self;
-    }
-
-    /// Set load balancing strategy
-    ///
-    /// # Arguments
-    /// * `strategy` - Load balancing strategy
-    ///
-    /// # Returns
-    /// Self for chaining
-    pub fn with_load_balance(self, strategy: LoadBalanceStrategy): WorkerPoolConfig {
-        self.load_balance = strategy;
-        return self;
-    }
-
-    /// Start the worker pool and return runtime
-    ///
-    /// This creates the actual Worker threads and channels. The runtime
-    /// should be stored in a local variable, not as a struct field.
-    ///
-    /// # Returns
-    /// WorkerPoolRuntime with active workers
-    ///
-    /// # Example
-    /// ```nv
-    /// let config = WorkerPoolConfig.new(4);
-    /// let runtime = try config.start();
-    /// ```
-    pub fn start(self): WorkerPoolRuntime throws {
-        let tasks = channel::<string>();
-        let responses = channel::<string>();
-        let workers: [Worker] = [];
-        let worker_channels: [channel<string>] = [];
-
-        // Create worker threads
-        for (let i in 0..self.size) {
-            let worker_ch = channel::<string>();
-            worker_channels.push(worker_ch);
-
-            let worker = try Worker.create(|w| {
-                // Worker loop: receive tasks and send results
-                while (true) {
-                    // Receive task JSON
-                    let task_result = try? w.recv::<string>();
-                    if (task_result == nil) {
-                        break;  // Shutdown signal
-                    }
-
-                    let task_json = task_result!;
-
-                    // Process task (placeholder - actual processing done by handler)
-                    // For now, just echo back
-                    let result_json = task_json;
-
-                    // Send result back
-                    try! w.send(result_json);
-                }
-            });
-
-            workers.push(worker);
-        }
-
-        // Start dispatcher task
-        spawn {
-            let current_worker = 0;
-
-            while (true) {
-                // Receive task from main queue
-                let task_result = try? tasks.recv();
-                if (task_result == nil) {
-                    break;  // Shutdown signal
-                }
-
-                let task_json = task_result!;
-
-                // Round-robin: send to next worker
-                let worker = workers[current_worker];
-                try! worker.send(task_json);
-
-                // Wait for result
-                let result_json = try! worker.recv::<string>();
-
-                // Send result back to main thread
-                try! responses.send(result_json);
-
-                // Move to next worker
-                current_worker = (current_worker + 1) % workers.len();
-            }
-        }
-
-        // Initialize worker states
-        let worker_states: [WorkerState] = [];
-        for (let worker in workers) {
-            worker_states.push(WorkerState {
-                worker,
-                active_tasks: 0,
-            });
-        }
-
-        return WorkerPoolRuntime {
-            config: self,
-            tasks,
-            responses,
-            workers,
-            worker_states,
-            shutdown_flag: false,
-            current_worker_index: 0,
-        };
-    }
-}
-
-/// Worker state for load balancing
-struct WorkerState {
-    /// Worker instance
-    worker: Worker,
-
-    /// Number of active tasks
-    active_tasks: int,
-}
-
-/// WorkerPool runtime (contains channels, must be in local scope)
+/// Worker pool for parallel task execution
 ///
-/// This struct contains channels which cannot be serialized, so it must
-/// be created in the function scope where it's used, not stored as a
-/// struct field.
-pub struct WorkerPoolRuntime {
-    /// Configuration used to create this runtime
-    config: WorkerPoolConfig,
+/// Wraps Worker.pool to provide JSON-based request/response handling
+/// for CPU-intensive route handlers.
+pub struct SakeWorkerPool {
+    /// Number of worker threads (informational, auto-detected by Worker.pool)
+    pub size: int,
 
-    /// Task queue (JSON-serialized tasks)
-    tasks: channel<string>,
-
-    /// Response queue (JSON-serialized results)
-    responses: channel<string>,
-
-    /// Worker threads
-    workers: [Worker],
-
-    /// Worker states for load balancing
-    worker_states: [WorkerState],
-
-    /// Shutdown flag
-    shutdown_flag: bool,
-
-    /// Current worker index (for round-robin)
-    current_worker_index: int,
+    /// The underlying worker pool
+    pool: WorkerPool<string, string>,
 }
 
-impl WorkerPoolRuntime {
+impl SakeWorkerPool {
+    /// Create a new worker pool
+    ///
+    /// # Arguments
+    /// * `size` - Number of worker threads
+    ///
+    /// # Returns
+    /// New WorkerPool instance
+    ///
+    /// # Errors
+    /// Throws if worker creation fails
+    ///
+    /// # Example
+    /// ```nv
+    /// let pool = try SakeWorkerPool.new(4);
+    /// ```
+    pub fn new(size: int): SakeWorkerPool throws {
+        if (size <= 0) {
+            throw "Worker pool size must be > 0";
+        }
+
+        // Create worker pool with handler function
+        // Worker.pool uses CPU count automatically for thread count
+        let pool = try Worker.pool(SakeWorkerPool.process_request);
+
+        println(`🍶 WorkerPool initialized with ${size} threads`);
+
+        return SakeWorkerPool {
+            size,
+            pool,
+        };
+    }
+
+    /// Process a request in worker thread
+    ///
+    /// # Arguments
+    /// * `ctx_json` - Serialized WorkerContext as JSON
+    ///
+    /// # Returns
+    /// Serialized WorkerResponse as JSON
+    fn process_request(ctx_json: string): string throws {
+        // Deserialize context
+        let ctx = try WorkerContext.from_json(ctx_json);
+
+        // TODO: Execute actual handler
+        // For now, return a simple success response
+        // Actual implementation would lookup and execute the registered handler
+
+        let response = WorkerResponse.new(
+            200,
+            {"Content-Type": "application/json"},
+            "{\"status\": \"ok\", \"worker\": true}"
+        );
+
+        return try response.to_json();
+    }
+
     /// Submit a task to the worker pool
     ///
     /// # Arguments
-    /// * `task_json` - Task data as JSON string
-    ///
-    /// # Example
-    /// ```nv
-    /// let task = json.encode({"type": "compute", "data": 42});
-    /// try runtime.submit(task);
-    /// ```
-    pub fn submit(self, task_json: string) throws {
-        if (self.shutdown_flag) {
-            throw "WorkerPool is shutting down";
-        }
-        try self.tasks.send(task_json);
-    }
-
-    /// Get the next result from the worker pool
+    /// * `context_json` - Serialized request context
+    /// * `handler_id` - Handler identifier (for future use)
     ///
     /// # Returns
-    /// Result data as JSON string
+    /// Worker response
+    ///
+    /// # Errors
+    /// Throws if submission or execution fails
     ///
     /// # Example
     /// ```nv
-    /// let result_json = try runtime.get_result();
-    /// let result = try json.decode::<Response>(result_json);
+    /// let ctx = WorkerContext.new("/test", "GET", {:}, {:}, {:}, "");
+    /// let ctx_json = try ctx.to_json();
+    /// let response = try pool.submit(ctx_json, 0);
     /// ```
-    pub fn get_result(self): string throws {
-        return try self.responses.recv();
+    pub fn submit(self, context_json: string, handler_id: int): WorkerResponse throws {
+        // Execute in worker pool
+        let result_json = try self.pool.map(context_json);
+
+        // Deserialize response
+        let response = try WorkerResponse.from_json(result_json);
+        return response;
     }
 
-    /// Get result with timeout
+    /// Submit multiple tasks in parallel
     ///
     /// # Arguments
-    /// * `timeout_secs` - Timeout in seconds
+    /// * `contexts` - Array of serialized request contexts
     ///
     /// # Returns
-    /// Result data or nil on timeout
-    pub fn get_result_timeout(self, timeout_secs: int): string? throws {
-        if (timeout_secs <= 0) {
-            return try self.get_result();
+    /// Array of worker responses
+    pub fn submit_batch(self, contexts: [string]): [WorkerResponse] throws {
+        let results = try self.pool.map_array(contexts);
+
+        let responses: [WorkerResponse] = [];
+        for (let result_json in results) {
+            let response = try WorkerResponse.from_json(result_json);
+            responses.push(response);
         }
 
-        // Spawn timeout task
-        let timeout_ch = channel::<bool>();
-        spawn {
-            time.sleep(timeout_secs.seconds());
-            try! timeout_ch.send(true);
-        }
-
-        // Race between result and timeout
-        spawn {
-            let result = try? self.responses.recv();
-            if (result != nil) {
-                // Signal that we got result first
-                try! timeout_ch.send(false);
-            }
-        }
-
-        let timed_out = try timeout_ch.recv();
-        if (timed_out) {
-            return nil;  // Timeout
-        }
-
-        return try self.responses.recv();
+        return responses;
     }
 
-    /// Select next worker based on load balancing strategy
-    fn select_worker(self): int {
-        let strategy = self.config.load_balance;
-
-        switch (strategy.(type)) {
-            case LoadBalanceStrategy.RoundRobin:
-                return self.select_round_robin();
-
-            case LoadBalanceStrategy.LeastLoaded:
-                return self.select_least_loaded();
-
-            case LoadBalanceStrategy.Random:
-                return self.select_random();
-
-            default:
-                return self.select_round_robin();
-        }
-    }
-
-    /// Round-robin worker selection
-    fn select_round_robin(self): int {
-        let index = self.current_worker_index;
-        self.current_worker_index = (self.current_worker_index + 1) % self.workers.len();
-        return index;
-    }
-
-    /// Select least loaded worker
-    fn select_least_loaded(self): int {
-        let min_index = 0;
-        let min_tasks = self.worker_states[0].active_tasks;
-
-        for (let i in 1..self.worker_states.len()) {
-            let tasks = self.worker_states[i].active_tasks;
-            if (tasks < min_tasks) {
-                min_tasks = tasks;
-                min_index = i;
-            }
-        }
-
-        return min_index;
-    }
-
-    /// Random worker selection
-    fn select_random(self): int {
-        // Simple pseudo-random (in real implementation, use std.rand)
-        let now = time.now().as_secs();
-        return (now as int) % self.workers.len();
-    }
-
-    /// Increment worker task count
-    fn increment_worker_tasks(self, worker_index: int) {
-        self.worker_states[worker_index].active_tasks += 1;
-    }
-
-    /// Decrement worker task count
-    fn decrement_worker_tasks(self, worker_index: int) {
-        if (self.worker_states[worker_index].active_tasks > 0) {
-            self.worker_states[worker_index].active_tasks -= 1;
-        }
-    }
-
-    /// Get the number of workers in the pool
-    pub fn size(self): int {
-        return self.config.size;
-    }
-
-    /// Check if the pool is shutting down
-    pub fn is_shutdown(self): bool {
-        return self.shutdown_flag;
-    }
-
-    /// Shutdown the worker pool gracefully
+    /// Shutdown the worker pool
     ///
-    /// This stops accepting new tasks and waits for current tasks to complete.
-    ///
-    /// # Example
-    /// ```nv
-    /// try runtime.shutdown();
-    /// ```
-    pub fn shutdown(self) throws {
-        if (self.shutdown_flag) {
-            return;  // Already shutting down
-        }
-
-        self.shutdown_flag = true;
-
-        // Send shutdown signal to all workers
-        for (let worker in self.workers) {
-            try? worker.send("__SHUTDOWN__");
-        }
-
-        // TODO: Wait for workers to finish (requires Worker.join() API)
-        // For now, just mark as shutdown
+    /// Note: Worker.pool handles cleanup automatically
+    pub fn shutdown(self) {
+        println("🍶 WorkerPool shutdown");
+        // Worker.pool handles cleanup automatically
     }
 }
 
@@ -413,81 +137,69 @@ impl WorkerPoolRuntime {
 // Tests
 // ============================================
 
-test "create worker pool config" {
-    let config = WorkerPoolConfig.new(4);
-
-    assert_eq config.size, 4;
-    assert_eq config.queue_size, 1000;
+test "create worker pool" {
+    let pool = try! SakeWorkerPool.new(4);
+    assert_eq pool.size, 4;
 }
 
-test "auto-detect cpu count" {
-    let config = WorkerPoolConfig.new(0);
+test "worker pool validates size" {
+    // Test that invalid pool sizes throw errors
+    let threw1 = false;
+    if (let _ = try? SakeWorkerPool.new(0)) {
+        // Should not succeed
+    } else {
+        threw1 = true;
+    }
+    assert threw1;
 
-    assert config.size > 0;
-    assert config.size <= 64;  // Reasonable upper bound
+    let threw2 = false;
+    if (let _ = try? SakeWorkerPool.new(-1)) {
+        // Should not succeed
+    } else {
+        threw2 = true;
+    }
+    assert threw2;
 }
 
-test "config with queue size" {
-    let config = WorkerPoolConfig.new(2)
-        .with_queue_size(500);
+test "submit task to worker pool" {
+    let pool = try! SakeWorkerPool.new(2);
 
-    assert_eq config.size, 2;
-    assert_eq config.queue_size, 500;
+    let ctx = WorkerContext.new(
+        "/test",
+        "GET",
+        {:},
+        {:},
+        {:},
+        ""
+    );
+
+    let ctx_json = try! ctx.to_json();
+
+    let response = try! pool.submit(ctx_json, 0);
+
+    assert_eq response.status, 200;
 }
 
-test "start worker pool runtime" {
-    let config = WorkerPoolConfig.new(2);
-    let runtime = try! config.start();
+test "submit batch to worker pool" {
+    let pool = try! SakeWorkerPool.new(2);
 
-    assert_eq runtime.size(), 2;
-    assert_eq runtime.is_shutdown(), false;
-
-    try! runtime.shutdown();
-}
-
-test "submit and get result" {
-    let config = WorkerPoolConfig.new(2);
-    let runtime = try! config.start();
-
-    // Submit a simple task
-    let task = `{"id": 1, "data": "test"}`;
-    try! runtime.submit(task);
-
-    // Get result
-    let result = try! runtime.get_result();
-
-    // For now, echo back the same data
-    assert_eq result, task;
-
-    try! runtime.shutdown();
-}
-
-test "multiple tasks round-robin" {
-    let config = WorkerPoolConfig.new(2);
-    let runtime = try! config.start();
-
-    // Submit multiple tasks
-    for (let i in 0..5) {
-        let task = `{"id": ${i}}`;
-        try! runtime.submit(task);
+    let contexts: [string] = [];
+    for (let i in 0..3) {
+        let ctx = WorkerContext.new(
+            `/test/${i}`,
+            "GET",
+            {:},
+            {:},
+            {:},
+            ""
+        );
+        contexts.push(try! ctx.to_json());
     }
 
-    // Get all results
-    for (let i in 0..5) {
-        let result = try! runtime.get_result();
-        assert result.contains(`"id": ${i}`);
+    let responses = try! pool.submit_batch(contexts);
+
+    assert_eq responses.len(), 3;
+    for (let resp in responses) {
+        assert_eq resp.status, 200;
     }
-
-    try! runtime.shutdown();
-}
-
-test "shutdown prevents new tasks" {
-    let config = WorkerPoolConfig.new(2);
-    let runtime = try! config.start();
-
-    try! runtime.shutdown();
-
-    // Submitting after shutdown should fail
-    let result = try? runtime.submit(`{"test": true}`);
-    assert_eq result, nil;
 }

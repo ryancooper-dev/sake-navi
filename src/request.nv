@@ -71,8 +71,8 @@ impl Request {
         
         let query_idx = uri.find("?");
         if (let idx = query_idx) {
-            path = uri.substring(0, idx);
-            let query_str = uri.substring(idx + 1, uri.len());
+            path = uri.slice(0, idx);
+            let query_str = uri.slice(idx + 1, uri.len());
             query_params = Request.parse_query_string(query_str);
         }
         
@@ -91,8 +91,8 @@ impl Request {
             
             let colon_idx = line.find(":");
             if (let idx = colon_idx) {
-                let key = line.substring(0, idx).trim().to_lowercase();
-                let value = line.substring(idx + 1, line.len()).trim();
+                let key = line.slice(0, idx).trim().to_lowercase();
+                let value = line.slice(idx + 1, line.len()).trim();
                 headers[key] = value;
             }
         }
@@ -133,8 +133,8 @@ impl Request {
         for (let pair in pairs) {
             let eq_idx = pair.find("=");
             if (let idx = eq_idx) {
-                let key = pair.substring(0, idx);
-                let value = pair.substring(idx + 1, pair.len());
+                let key = pair.slice(0, idx);
+                let value = pair.slice(idx + 1, pair.len());
                 // TODO: URL decode
                 params[key] = value;
             } else {
@@ -174,11 +174,9 @@ impl Request {
     }
     
     /// Get Content-Length as integer
+    /// TODO: Implement string to int parsing when Navi supports it
     pub fn content_length(self): int? {
-        let len_str = self.header("content-length");
-        if (let s = len_str) {
-            return try? s.parse::<int>();
-        }
+        // String parsing not yet implemented in Navi
         return nil;
     }
     

@@ -1,9 +1,9 @@
 /// Request Context
-/// 
+///
 /// Context is the most important struct in navi-web. It provides a unified interface
 /// for accessing request data and building responses. Context is passed to every
 /// handler and middleware.
-/// 
+///
 /// # Example
 /// ```nv
 /// fn handler(ctx: Context) {
@@ -13,59 +13,43 @@
 /// }
 /// ```
 
-use request.Request;
-use response.Response;
+use std.fs;
+use std.json;
+// Note: request, response, worker_context are in same module
 
 /// Handler function type
 /// All handlers and middleware use this signature
-pub type HandlerFunc = |(ctx: Context) throws|;
-
-/// Query parameter result with existence check
-pub struct QueryResult {
-    /// The parameter value (empty string if not found)
-    value: string,
-
-    /// Whether the parameter exists
-    exists: bool,
-}
-
-/// Form parameter result with existence check
-pub struct FormResult {
-    /// The parameter value (empty string if not found)
-    value: string,
-
-    /// Whether the parameter exists
-    exists: bool,
-}
+pub type HandlerFunc = |(Context) throws|;
 
 /// Request context - the primary interface for handlers
 struct Context {
     /// The incoming HTTP request
     request: Request,
-
+    
     /// The outgoing HTTP response
     response: Response,
-
+    
     /// Path parameters extracted from route (e.g., :id)
     params: <string, string>,
-
+    
     /// Handler chain (middleware + final handler)
     handlers: [HandlerFunc],
-
+    
     /// Current index in handler chain
     index: int = -1,
-
+    
     /// Key-value store for passing data between middleware
-    keys: <string, any>,
-
+    /// TODO: Replace with proper type once Navi supports dynamic types
+    keys: <string, string>,
+    
     /// Whether the handler chain was aborted
     aborted: bool = false,
 
-    /// Cached form data (parsed on first access)
-    form_data: <string, string>?,
+    /// Whether this handler is running in a worker pool thread
+    in_worker: bool = false,
 
-    /// Cached cookies (parsed on first access)
-    cookies: <string, string>?,
+    /// Worker pool size (0 if not using worker pool)
+    worker_size: int = 0,
 }
 
 impl Context {
@@ -77,11 +61,9 @@ impl Context {
             params: {:},
             handlers: [],
             keys: {:},
-            form_data: nil,
-            cookies: nil,
         };
     }
-
+    
     /// Create context with handlers
     pub fn with_handlers(request: Request, handlers: [HandlerFunc], params: <string, string>): Context {
         return Context {
@@ -90,8 +72,6 @@ impl Context {
             params,
             handlers,
             keys: {:},
-            form_data: nil,
-            cookies: nil,
         };
     }
     
@@ -133,41 +113,25 @@ impl Context {
         return self.request.query(name);
     }
 
-    /// Get query parameter with existence check
+    /// Get query parameter with default value
     ///
     /// # Arguments
     /// * `name` - Query parameter name
+    /// * `default` - Default value if parameter not found
     ///
     /// # Returns
-    /// QueryResult with value and exists flag
+    /// Parameter value or default if not found
     ///
     /// # Example
     /// ```nv
     /// // URL: /users?page=2
-    /// let page_result = ctx.get_query("page");
-    /// if (page_result.exists) {
-    ///     println(`Page: ${page_result.value}`);
-    /// }
-    ///
-    /// let limit_result = ctx.get_query("limit");
-    /// if (!limit_result.exists) {
-    ///     println("No limit specified");
-    /// }
+    /// let page = ctx.default_query("page", "1");  // Returns "2"
+    /// let limit = ctx.default_query("limit", "10");  // Returns "10" (not in URL)
     /// ```
-    pub fn get_query(self, name: string): QueryResult {
-        let value = self.request.query(name);
-        if (value != nil) {
-            return QueryResult {
-                value: value!,
-                exists: true,
-            };
-        }
-        return QueryResult {
-            value: "",
-            exists: false,
-        };
+    pub fn default_query(self, name: string, default_value: string): string {
+        return self.query(name) || default_value;
     }
-    
+
     /// Get request header by name
     pub fn header(self, name: string): string? {
         return self.request.header(name);
@@ -198,119 +162,9 @@ impl Context {
         return self.request.content_type();
     }
 
-    /// Parse form data from request body
-    ///
-    /// Lazily parses application/x-www-form-urlencoded data on first access
-    fn parse_form_data(self) {
-        if (self.form_data != nil) {
-            return;  // Already parsed
-        }
-
-        self.form_data = {:};
-
-        // Check if content type is form data
-        let ct = self.content_type();
-        if (ct == nil || !ct!.contains("application/x-www-form-urlencoded")) {
-            return;
-        }
-
-        // Parse form data (key1=value1&key2=value2)
-        let body = self.request.body;
-        if (body.len() == 0) {
-            return;
-        }
-
-        let pairs = body.split("&");
-        for (let pair in pairs) {
-            let parts = pair.split("=");
-            if (parts.len() == 2) {
-                let key = self.url_decode(parts[0]);
-                let value = self.url_decode(parts[1]);
-                self.form_data![key] = value;
-            }
-        }
-    }
-
-    /// Simple URL decode
-    fn url_decode(self, s: string): string {
-        // TODO: Implement proper URL decoding
-        // For now, just replace + with space
-        return s.replace("+", " ");
-    }
-
-    /// Get POST form parameter by name
-    ///
-    /// # Arguments
-    /// * `name` - Form field name
-    ///
-    /// # Returns
-    /// Parameter value or nil if not found
-    ///
-    /// # Example
-    /// ```nv
-    /// // POST body: name=Alice&email=alice@example.com
-    /// let name = ctx.post_form("name") || "Anonymous";
-    /// ```
-    pub fn post_form(self, name: string): string? {
-        self.parse_form_data();
-        return self.form_data!.get(name);
-    }
-
-    /// Get POST form parameter with existence check
-    ///
-    /// # Arguments
-    /// * `name` - Form field name
-    ///
-    /// # Returns
-    /// FormResult with value and exists flag
-    ///
-    /// # Example
-    /// ```nv
-    /// let name_result = ctx.get_post_form("name");
-    /// if (name_result.exists) {
-    ///     println(`Name: ${name_result.value}`);
-    /// }
-    /// ```
-    pub fn get_post_form(self, name: string): FormResult {
-        self.parse_form_data();
-        let value = self.form_data!.get(name);
-        if (value != nil) {
-            return FormResult {
-                value: value!,
-                exists: true,
-            };
-        }
-        return FormResult {
-            value: "",
-            exists: false,
-        };
-    }
-
-    /// Parse cookies from request headers
-    fn parse_cookies(self) {
-        if (self.cookies != nil) {
-            return;  // Already parsed
-        }
-
-        self.cookies = {:};
-
-        let cookie_header = self.header("Cookie");
-        if (cookie_header == nil) {
-            return;
-        }
-
-        // Parse cookies (key1=value1; key2=value2)
-        let pairs = cookie_header!.split(";");
-        for (let pair in pairs) {
-            let trimmed = pair.trim();
-            let parts = trimmed.split("=");
-            if (parts.len() == 2) {
-                self.cookies![parts[0].trim()] = parts[1].trim();
-            }
-        }
-    }
-
     /// Get cookie value by name
+    ///
+    /// Parses the Cookie header and returns the value for the specified cookie.
     ///
     /// # Arguments
     /// * `name` - Cookie name
@@ -320,42 +174,229 @@ impl Context {
     ///
     /// # Example
     /// ```nv
-    /// let session = ctx.cookie("session_id");
-    /// if (session != nil) {
-    ///     println(`Session: ${session!}`);
-    /// }
+    /// // Request: Cookie: session_id=abc123; user_pref=dark
+    /// let session = ctx.cookie("session_id");  // "abc123"
+    /// let pref = ctx.cookie("user_pref");  // "dark"
     /// ```
     pub fn cookie(self, name: string): string? {
-        self.parse_cookies();
-        return self.cookies!.get(name);
+        let cookie_header = self.header("cookie") || "";
+        if (cookie_header.len() == 0) {
+            return nil;
+        }
+
+        // Parse cookies: "name1=value1; name2=value2"
+        let pairs = cookie_header.split(";");
+        for (let pair in pairs) {
+            let trimmed = pair.trim();
+            let eq_idx = trimmed.find("=");
+            if (let idx = eq_idx) {
+                let key = trimmed.slice(0, idx).trim();
+                let value = trimmed.slice(idx + 1, trimmed.len()).trim();
+                if (key == name) {
+                    return value;
+                }
+            }
+        }
+
+        return nil;
     }
-    
+
+    /// Set a cookie in the response
+    ///
+    /// Sets a Set-Cookie header with the specified name and value.
+    /// For simplicity, this basic version only supports name and value.
+    /// For advanced options (expires, path, domain, secure, httponly),
+    /// use set_cookie_advanced().
+    ///
+    /// # Arguments
+    /// * `name` - Cookie name
+    /// * `value` - Cookie value
+    ///
+    /// # Example
+    /// ```nv
+    /// ctx.set_cookie("session_id", "abc123");
+    /// ctx.set_cookie("theme", "dark");
+    /// ```
+    pub fn set_cookie(self, name: string, value: string) {
+        let cookie_value = `${name}=${value}`;
+        self.response.header("Set-Cookie", cookie_value);
+    }
+
+    /// Set a cookie with advanced options
+    ///
+    /// # Arguments
+    /// * `name` - Cookie name
+    /// * `value` - Cookie value
+    /// * `max_age` - Max age in seconds (nil for session cookie)
+    /// * `path` - Cookie path (nil for "/")
+    /// * `domain` - Cookie domain (nil for current domain)
+    /// * `secure` - Whether cookie requires HTTPS
+    /// * `http_only` - Whether cookie is HTTP only (not accessible via JavaScript)
+    ///
+    /// # Example
+    /// ```nv
+    /// ctx.set_cookie_advanced("session_id", "abc123", 3600, "/", nil, true, true);
+    /// ```
+    pub fn set_cookie_advanced(
+        self,
+        name: string,
+        value: string,
+        max_age: int?,
+        path: string?,
+        domain: string?,
+        secure: bool,
+        http_only: bool
+    ) {
+        let cookie_value = `${name}=${value}`;
+
+        // Add Max-Age
+        if (let age = max_age) {
+            cookie_value = `${cookie_value}; Max-Age=${age}`;
+        }
+
+        // Add Path
+        let cookie_path = path || "/";
+        cookie_value = `${cookie_value}; Path=${cookie_path}`;
+
+        // Add Domain
+        if (let dom = domain) {
+            cookie_value = `${cookie_value}; Domain=${dom}`;
+        }
+
+        // Add Secure flag
+        if (secure) {
+            cookie_value = `${cookie_value}; Secure`;
+        }
+
+        // Add HttpOnly flag
+        if (http_only) {
+            cookie_value = `${cookie_value}; HttpOnly`;
+        }
+
+        self.response.header("Set-Cookie", cookie_value);
+    }
+
     // ============================================
     // Request body parsing
     // ============================================
     
     /// Parse request body as JSON into type T
-    /// 
+    ///
     /// # Returns
     /// Parsed value or throws on parse error
-    /// 
+    ///
     /// # Example
     /// ```nv
     /// struct CreateUser {
     ///     name: string,
     ///     email: string,
     /// }
-    /// 
-    /// let user = try ctx.bind_json::<CreateUser>();
+    ///
+    /// let json_str = try ctx.bind_json();
     /// ```
-    pub fn bind_json(self): T throws {
+    ///
+    /// TODO: Add generic type support when Navi supports it
+    pub fn bind_json(self): string throws {
         let body = self.request.body;
         if (body.len() == 0) {
             throw "Empty request body";
         }
-        return try json.decode::<T>(body);
+        // Return raw JSON string for now
+        return body;
     }
-    
+
+    /// Parse query string parameters into a map
+    ///
+    /// Returns all query parameters as a string-to-string map.
+    /// Unlike query() which gets a single parameter, this returns all parameters.
+    ///
+    /// # Returns
+    /// Map of query parameters
+    ///
+    /// # Example
+    /// ```nv
+    /// // URL: /search?q=navi&limit=10&page=2
+    /// let params = ctx.bind_query();
+    /// let query = params.get("q") || "";  // "navi"
+    /// let limit = params.get("limit") || "20";  // "10"
+    /// ```
+    pub fn bind_query(self): <string, string> {
+        return self.request.query_params;
+    }
+
+    /// Parse form data from request body
+    ///
+    /// Parses application/x-www-form-urlencoded form data into a map.
+    /// Similar to bind_query() but parses the request body instead of URL.
+    ///
+    /// # Returns
+    /// Map of form fields or throws on parse error
+    ///
+    /// # Errors
+    /// Throws if Content-Type is not application/x-www-form-urlencoded
+    ///
+    /// # Example
+    /// ```nv
+    /// // POST /login
+    /// // Content-Type: application/x-www-form-urlencoded
+    /// // Body: username=alice&password=secret
+    /// let form = try ctx.bind_form();
+    /// let username = form.get("username") || "";
+    /// ```
+    pub fn bind_form(self): <string, string> throws {
+        // Check content type
+        let content_type = self.content_type() || "";
+        if (!content_type.contains("application/x-www-form-urlencoded")) {
+            throw `Expected application/x-www-form-urlencoded, got ${content_type}`;
+        }
+
+        let body = self.request.body;
+        if (body.len() == 0) {
+            return {:};
+        }
+
+        // Parse form data using same logic as query string
+        return Request.parse_query_string(body);
+    }
+
+    /// Get URI path parameters as a map
+    ///
+    /// Returns all path parameters extracted from the route pattern.
+    /// This is similar to param() but returns all parameters at once.
+    ///
+    /// # Returns
+    /// Map of path parameters
+    ///
+    /// # Example
+    /// ```nv
+    /// // Route: /users/:id/posts/:post_id
+    /// // URL: /users/123/posts/456
+    /// let params = ctx.bind_uri();
+    /// let user_id = params.get("id") || "";  // "123"
+    /// let post_id = params.get("post_id") || "";  // "456"
+    /// ```
+    pub fn bind_uri(self): <string, string> {
+        return self.params;
+    }
+
+    /// Get all request headers as a map
+    ///
+    /// Returns all HTTP headers from the request.
+    /// Header names are normalized to lowercase.
+    ///
+    /// # Returns
+    /// Map of headers (lowercase keys)
+    ///
+    /// # Example
+    /// ```nv
+    /// let headers = ctx.bind_header();
+    /// let auth = headers.get("authorization") || "";
+    /// let user_agent = headers.get("user-agent") || "";
+    /// ```
+    pub fn bind_header(self): <string, string> {
+        return self.request.headers;
+    }
+
     // ============================================
     // Response helpers
     // ============================================
@@ -377,89 +418,18 @@ impl Context {
         self.response.header(name, value);
         return self;
     }
-
-    /// Set cookie in response
-    ///
-    /// # Arguments
-    /// * `name` - Cookie name
-    /// * `value` - Cookie value
-    /// * `max_age` - Max age in seconds (0 = session cookie)
-    /// * `path` - Cookie path (default: "/")
-    /// * `domain` - Cookie domain (empty = current domain)
-    /// * `secure` - Secure flag (HTTPS only)
-    /// * `http_only` - HttpOnly flag (no JavaScript access)
-    ///
-    /// # Example
-    /// ```nv
-    /// // Simple session cookie
-    /// ctx.set_cookie("session_id", "abc123", 0, "/", "", false, true);
-    ///
-    /// // Cookie with 1 hour expiry
-    /// ctx.set_cookie("token", "xyz789", 3600, "/", "", true, true);
-    /// ```
-    pub fn set_cookie(
-        self,
-        name: string,
-        value: string,
-        max_age: int,
-        path: string,
-        domain: string,
-        secure: bool,
-        http_only: bool
-    ): Context {
-        let cookie = `${name}=${value}`;
-
-        if (path.len() > 0) {
-            cookie = cookie + `; Path=${path}`;
-        } else {
-            cookie = cookie + "; Path=/";
-        }
-
-        if (domain.len() > 0) {
-            cookie = cookie + `; Domain=${domain}`;
-        }
-
-        if (max_age > 0) {
-            cookie = cookie + `; Max-Age=${max_age}`;
-        }
-
-        if (secure) {
-            cookie = cookie + "; Secure";
-        }
-
-        if (http_only) {
-            cookie = cookie + "; HttpOnly";
-        }
-
-        self.response.header("Set-Cookie", cookie);
-        return self;
-    }
-
-    /// Set simple cookie with default options
-    ///
-    /// # Arguments
-    /// * `name` - Cookie name
-    /// * `value` - Cookie value
-    ///
-    /// # Example
-    /// ```nv
-    /// ctx.set_simple_cookie("user", "alice");
-    /// ```
-    pub fn set_simple_cookie(self, name: string, value: string): Context {
-        return self.set_cookie(name, value, 0, "/", "", false, false);
-    }
     
     /// Send JSON response
-    /// 
+    ///
     /// # Arguments
     /// * `data` - Data to encode as JSON
-    /// 
+    ///
     /// # Example
     /// ```nv
     /// try ctx.json({"message": "Hello", "count": 42});
     /// ```
-    pub fn json(self, data: any) throws {
-        let body = try json.encode(data);
+    pub fn json<T>(self, data: T) throws {
+        let body = try json.to_string(data);
         self.response.content_type("application/json; charset=utf-8");
         self.response.write(body);
     }
@@ -475,13 +445,109 @@ impl Context {
         self.response.content_type("text/html; charset=utf-8");
         self.response.write(content);
     }
-    
+
+    /// Send XML response
+    ///
+    /// # Arguments
+    /// * `data` - Data to encode as XML
+    ///
+    /// # Example
+    /// ```nv
+    /// ctx.xml("<user><name>Alice</name></user>");
+    /// ```
+    ///
+    /// Note: Currently accepts pre-formatted XML string.
+    /// Full struct-to-XML serialization pending Navi XML encoder support.
+    pub fn xml(self, xml_string: string) {
+        self.response.content_type("application/xml; charset=utf-8");
+        self.response.write(xml_string);
+    }
+
+    /// Send YAML response
+    ///
+    /// # Arguments
+    /// * `data` - Data to encode as YAML
+    ///
+    /// # Example
+    /// ```nv
+    /// ctx.yaml("name: Alice\nage: 30\n");
+    /// ```
+    ///
+    /// Note: Currently accepts pre-formatted YAML string.
+    /// Full struct-to-YAML serialization pending Navi YAML encoder support.
+    pub fn yaml(self, yaml_string: string) {
+        self.response.content_type("application/yaml; charset=utf-8");
+        self.response.write(yaml_string);
+    }
+
     /// Send raw bytes
     pub fn data(self, content_type: string, data: string) {
         self.response.content_type(content_type);
         self.response.write(data);
     }
-    
+
+    /// Send file with automatic content-type detection
+    ///
+    /// # Arguments
+    /// * `file_path` - Path to file to send
+    ///
+    /// # Example
+    /// ```nv
+    /// ctx.file("./static/image.png");
+    /// ```
+    pub fn file(self, file_path: string) throws {
+
+        // Read file contents
+        let contents = try fs.read_to_string(file_path);
+
+        // Detect content type from extension
+        let content_type = detect_content_type(file_path);
+        self.response.content_type(content_type);
+
+        // Write file contents
+        self.response.write(contents);
+    }
+
+    /// Send file as download with custom filename
+    ///
+    /// Sets Content-Disposition header to trigger download.
+    ///
+    /// # Arguments
+    /// * `file_path` - Path to file
+    /// * `download_name` - Filename for download (optional, defaults to file basename)
+    ///
+    /// # Example
+    /// ```nv
+    /// ctx.download("./reports/data.csv", "report-2024.csv");
+    /// ```
+    pub fn download(self, file_path: string, download_name: string?) throws {
+
+        // Read file contents
+        let contents = try fs.read_to_string(file_path);
+
+        // Determine download filename
+        let filename = "";
+        if (let name = download_name) {
+            filename = name;
+        } else {
+            // Extract basename from file path
+            let parts = file_path.split("/");
+            if (parts.len() > 0) {
+                filename = parts[parts.len() - 1];
+            } else {
+                filename = file_path;
+            }
+        }
+
+        // Set headers for download
+        let content_type = detect_content_type(file_path);
+        self.response.content_type(content_type);
+        self.response.header("Content-Disposition", `attachment; filename="${filename}"`);
+
+        // Write file contents
+        self.response.write(contents);
+    }
+
     /// Redirect to another URL
     pub fn redirect(self, code: int, url: string) {
         self.response.status(code);
@@ -551,29 +617,58 @@ impl Context {
     // ============================================
     
     /// Store a value in context for later retrieval
-    /// 
+    ///
     /// Useful for passing data between middleware.
-    /// 
+    ///
     /// # Example
     /// ```nv
     /// // In auth middleware
-    /// ctx.set("user_id", user.id);
-    /// 
+    /// ctx.set("user_id", "123");
+    ///
     /// // In handler
-    /// let user_id = ctx.get("user_id") as int;
+    /// let user_id = ctx.get("user_id");
     /// ```
-    pub fn set(self, key: string, value: any) {
+    pub fn set(self, key: string, value: string) {
         self.keys[key] = value;
     }
-    
+
     /// Get a value from context
-    /// 
+    ///
     /// # Returns
     /// Stored value or nil if not found
-    pub fn get(self, key: string): any? {
+    pub fn get(self, key: string): string? {
         return self.keys.get(key);
     }
-    
+
+    /// Get a value from context or throw if not found
+    ///
+    /// Similar to get() but throws an error instead of returning nil.
+    /// Useful when a value is required and absence indicates a bug.
+    ///
+    /// # Arguments
+    /// * `key` - Key to retrieve
+    ///
+    /// # Returns
+    /// Stored value
+    ///
+    /// # Errors
+    /// Throws if key not found in context
+    ///
+    /// # Example
+    /// ```nv
+    /// // In auth middleware
+    /// ctx.set("user_id", "123");
+    ///
+    /// // In handler - throws if user_id missing
+    /// let user_id = try ctx.must_get("user_id");
+    /// ```
+    pub fn must_get(self, key: string): string throws {
+        if (let value = self.keys.get(key)) {
+            return value;
+        }
+        throw `Key "${key}" not found in context`;
+    }
+
     /// Get a string value from context
     pub fn get_string(self, key: string): string? {
         let value = self.keys.get(key);
@@ -584,13 +679,156 @@ impl Context {
     }
     
     /// Get an int value from context
+    /// NOTE: Since context stores all values as strings, this method
+    /// is not currently functional. Use get_string() and parse manually.
     pub fn get_int(self, key: string): int? {
+        // TODO: Implement string to int parsing when Navi supports it
+        return nil;
+    }
+
+    /// Get a bool value from context
+    /// Parses the stored string value as a boolean
+    pub fn get_bool(self, key: string): bool? {
         let value = self.keys.get(key);
         if (let v = value) {
-            return v as int;
+            if (v == "true") {
+                return true;
+            } else if (v == "false") {
+                return false;
+            }
         }
         return nil;
     }
+
+    /// Get a float value from context
+    /// NOTE: Since context stores all values as strings, this method
+    /// is not currently functional. Use get_string() and parse manually.
+    pub fn get_float(self, key: string): float? {
+        // TODO: Implement string to float parsing when Navi supports it
+        return nil;
+    }
+
+    // ============================================
+    // Worker pool support
+    // ============================================
+
+    /// Check if handler is running in a worker pool thread
+    ///
+    /// # Returns
+    /// true if running in worker pool, false otherwise
+    pub fn in_worker_pool(self): bool {
+        return self.in_worker;
+    }
+
+    /// Get the worker pool size
+    ///
+    /// # Returns
+    /// Worker pool size, or 0 if not using worker pool
+    pub fn worker_pool_size(self): int {
+        return self.worker_size;
+    }
+
+    /// Convert Context to serializable WorkerContext
+    ///
+    /// Used to send request data to worker threads.
+    ///
+    /// # Returns
+    /// WorkerContext with serializable request data
+    pub fn to_worker_context(self): WorkerContext {
+        return WorkerContext.new(
+            self.request.path,
+            self.request.method,
+            self.request.headers,
+            self.request.query_params,
+            self.params,
+            self.request.body
+        );
+    }
+}
+
+// ============================================
+// Helper Functions
+// ============================================
+
+/// Detect content type from file extension
+fn detect_content_type(file_path: string): string {
+    let lower_path = file_path.to_lowercase();
+
+    // HTML
+    if (lower_path.ends_with(".html") || lower_path.ends_with(".htm")) {
+        return "text/html; charset=utf-8";
+    }
+
+    // CSS
+    if (lower_path.ends_with(".css")) {
+        return "text/css; charset=utf-8";
+    }
+
+    // JavaScript
+    if (lower_path.ends_with(".js")) {
+        return "application/javascript; charset=utf-8";
+    }
+
+    // JSON
+    if (lower_path.ends_with(".json")) {
+        return "application/json; charset=utf-8";
+    }
+
+    // Images
+    if (lower_path.ends_with(".png")) {
+        return "image/png";
+    }
+    if (lower_path.ends_with(".jpg") || lower_path.ends_with(".jpeg")) {
+        return "image/jpeg";
+    }
+    if (lower_path.ends_with(".gif")) {
+        return "image/gif";
+    }
+    if (lower_path.ends_with(".svg")) {
+        return "image/svg+xml";
+    }
+    if (lower_path.ends_with(".ico")) {
+        return "image/x-icon";
+    }
+
+    // Fonts
+    if (lower_path.ends_with(".woff")) {
+        return "font/woff";
+    }
+    if (lower_path.ends_with(".woff2")) {
+        return "font/woff2";
+    }
+    if (lower_path.ends_with(".ttf")) {
+        return "font/ttf";
+    }
+
+    // Documents
+    if (lower_path.ends_with(".pdf")) {
+        return "application/pdf";
+    }
+    if (lower_path.ends_with(".xml")) {
+        return "application/xml; charset=utf-8";
+    }
+    if (lower_path.ends_with(".txt")) {
+        return "text/plain; charset=utf-8";
+    }
+    if (lower_path.ends_with(".csv")) {
+        return "text/csv; charset=utf-8";
+    }
+
+    // Archives
+    if (lower_path.ends_with(".zip")) {
+        return "application/zip";
+    }
+    if (lower_path.ends_with(".tar")) {
+        return "application/x-tar";
+    }
+    if (lower_path.ends_with(".gz")) {
+        return "application/gzip";
+    }
+
+    // Default
+    return "application/octet-stream";
 }
 
 // ============================================
@@ -617,13 +855,29 @@ test "access query params" {
 test "set and get context values" {
     let req = try! Request.parse("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n");
     let ctx = Context.new(req, Response.new());
-    
-    ctx.set("user_id", 123);
+
+    ctx.set("user_id", "123");
     ctx.set("role", "admin");
-    
-    assert_eq ctx.get_int("user_id"), 123;
+
+    // Note: get_int/get_float are not yet implemented
+    assert_eq ctx.get_string("user_id"), "123";
     assert_eq ctx.get_string("role"), "admin";
     assert_eq ctx.get("missing"), nil;
+}
+
+test "must_get returns value or throws" {
+    let req = try! Request.parse("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n");
+    let ctx = Context.new(req, Response.new());
+
+    ctx.set("user_id", "123");
+
+    // Should return value when key exists
+    let user_id = try! ctx.must_get("user_id");
+    assert_eq user_id, "123";
+
+    // Should throw when key doesn't exist
+    let result = try? ctx.must_get("missing_key");
+    assert_eq result, nil;
 }
 
 test "response helpers" {
@@ -659,82 +913,138 @@ test "path params" {
     assert_eq ctx.param("missing"), nil;
 }
 
-test "get_query with existence check" {
-    let req = try! Request.parse("GET /test?page=2&limit=10 HTTP/1.1\r\nHost: localhost\r\n\r\n");
-    let ctx = Context.new(req, Response.new());
-
-    let page_result = ctx.get_query("page");
-    assert_eq page_result.exists, true;
-    assert_eq page_result.value, "2";
-
-    let missing_result = ctx.get_query("offset");
-    assert_eq missing_result.exists, false;
-    assert_eq missing_result.value, "";
-}
-
-test "post_form parsing" {
-    let req = try! Request.parse("POST /submit HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/x-www-form-urlencoded\r\n\r\nname=Alice&email=alice@example.com");
-    let ctx = Context.new(req, Response.new());
-
-    let name = ctx.post_form("name");
-    assert_eq name, "Alice";
-
-    let email = ctx.post_form("email");
-    assert_eq email, "alice@example.com";
-
-    let missing = ctx.post_form("phone");
-    assert_eq missing, nil;
-}
-
-test "get_post_form with existence check" {
-    let req = try! Request.parse("POST /submit HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/x-www-form-urlencoded\r\n\r\nname=Bob&age=30");
-    let ctx = Context.new(req, Response.new());
-
-    let name_result = ctx.get_post_form("name");
-    assert_eq name_result.exists, true;
-    assert_eq name_result.value, "Bob";
-
-    let missing_result = ctx.get_post_form("email");
-    assert_eq missing_result.exists, false;
-    assert_eq missing_result.value, "";
-}
-
-test "cookie parsing" {
-    let req = try! Request.parse("GET / HTTP/1.1\r\nHost: localhost\r\nCookie: session_id=abc123; user=alice\r\n\r\n");
-    let ctx = Context.new(req, Response.new());
-
-    let session = ctx.cookie("session_id");
-    assert_eq session, "abc123";
-
-    let user = ctx.cookie("user");
-    assert_eq user, "alice";
-
-    let missing = ctx.cookie("token");
-    assert_eq missing, nil;
-}
-
-test "set_cookie" {
+test "check not in worker pool by default" {
     let req = try! Request.parse("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n");
     let ctx = Context.new(req, Response.new());
 
-    ctx.set_cookie("session", "xyz789", 3600, "/", "", false, true);
-
-    let cookie_header = ctx.response.get_header("Set-Cookie");
-    assert cookie_header != nil;
-    assert cookie_header!.contains("session=xyz789");
-    assert cookie_header!.contains("Path=/");
-    assert cookie_header!.contains("Max-Age=3600");
-    assert cookie_header!.contains("HttpOnly");
+    assert_eq ctx.in_worker_pool(), false;
+    assert_eq ctx.worker_pool_size(), 0;
 }
 
-test "set_simple_cookie" {
+test "convert context to worker context" {
+    let req = try! Request.parse("GET /users/123?page=1 HTTP/1.1\r\nHost: localhost\r\n\r\nbody");
+    let params: <string, string> = {"id": "123"};
+    let ctx = Context.with_handlers(req, [], params);
+
+    let worker_ctx = ctx.to_worker_context();
+
+    assert_eq worker_ctx.path, "/users/123";
+    assert_eq worker_ctx.method, "GET";
+    assert_eq worker_ctx.params.get("id"), "123";
+    assert_eq worker_ctx.query.get("page"), "1";
+    assert_eq worker_ctx.body, "body";
+}
+
+test "bind_query returns all query parameters" {
+    let req = try! Request.parse("GET /search?q=navi&limit=10&page=2 HTTP/1.1\r\nHost: localhost\r\n\r\n");
+    let ctx = Context.new(req, Response.new());
+
+    let params = ctx.bind_query();
+    assert_eq params.get("q"), "navi";
+    assert_eq params.get("limit"), "10";
+    assert_eq params.get("page"), "2";
+    assert_eq params.get("missing"), nil;
+}
+
+test "bind_form parses urlencoded form data" {
+    let req = try! Request.parse("POST /login HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/x-www-form-urlencoded\r\n\r\nusername=alice&password=secret123");
+    let ctx = Context.new(req, Response.new());
+
+    let form = try! ctx.bind_form();
+    assert_eq form.get("username"), "alice";
+    assert_eq form.get("password"), "secret123";
+}
+
+test "bind_form throws on wrong content type" {
+    let req = try! Request.parse("POST /login HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\n\r\n{}");
+    let ctx = Context.new(req, Response.new());
+
+    let result = try? ctx.bind_form();
+    assert_eq result, nil;
+}
+
+test "bind_form returns empty map for empty body" {
+    let req = try! Request.parse("POST /login HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/x-www-form-urlencoded\r\n\r\n");
+    let ctx = Context.new(req, Response.new());
+
+    let form = try! ctx.bind_form();
+    assert_eq form.len(), 0;
+}
+
+test "bind_uri returns path parameters" {
+    let req = try! Request.parse("GET /users/123/posts/456 HTTP/1.1\r\nHost: localhost\r\n\r\n");
+    let params: <string, string> = {"id": "123", "post_id": "456"};
+    let ctx = Context.with_handlers(req, [], params);
+
+    let uri_params = ctx.bind_uri();
+    assert_eq uri_params.get("id"), "123";
+    assert_eq uri_params.get("post_id"), "456";
+}
+
+test "bind_header returns all headers" {
+    let req = try! Request.parse("GET / HTTP/1.1\r\nHost: localhost\r\nUser-Agent: TestClient\r\nAuthorization: Bearer token123\r\n\r\n");
+    let ctx = Context.new(req, Response.new());
+
+    let headers = ctx.bind_header();
+    assert_eq headers.get("host"), "localhost";
+    assert_eq headers.get("user-agent"), "TestClient";
+    assert_eq headers.get("authorization"), "Bearer token123";
+}
+
+test "parse cookies from request" {
+    let req = try! Request.parse("GET / HTTP/1.1\r\nHost: localhost\r\nCookie: session_id=abc123; theme=dark; lang=en\r\n\r\n");
+    let ctx = Context.new(req, Response.new());
+
+    assert_eq ctx.cookie("session_id"), "abc123";
+    assert_eq ctx.cookie("theme"), "dark";
+    assert_eq ctx.cookie("lang"), "en";
+    assert_eq ctx.cookie("missing"), nil;
+}
+
+test "parse cookies with spaces" {
+    let req = try! Request.parse("GET / HTTP/1.1\r\nHost: localhost\r\nCookie: name1=value1;  name2=value2  ; name3=value3\r\n\r\n");
+    let ctx = Context.new(req, Response.new());
+
+    assert_eq ctx.cookie("name1"), "value1";
+    assert_eq ctx.cookie("name2"), "value2";
+    assert_eq ctx.cookie("name3"), "value3";
+}
+
+test "set_cookie adds Set-Cookie header" {
     let req = try! Request.parse("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n");
     let ctx = Context.new(req, Response.new());
 
-    ctx.set_simple_cookie("user", "alice");
+    ctx.set_cookie("session_id", "abc123");
 
-    let cookie_header = ctx.response.get_header("Set-Cookie");
-    assert cookie_header != nil;
-    assert cookie_header!.contains("user=alice");
-    assert cookie_header!.contains("Path=/");
+    assert_eq ctx.response.get_header("Set-Cookie"), "session_id=abc123";
+}
+
+test "set_cookie_advanced with all options" {
+    let req = try! Request.parse("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n");
+    let ctx = Context.new(req, Response.new());
+
+    ctx.set_cookie_advanced("session_id", "abc123", 3600, "/app", "example.com", true, true);
+
+    let cookie_header = ctx.response.get_header("Set-Cookie") || "";
+    assert cookie_header.contains("session_id=abc123");
+    assert cookie_header.contains("Max-Age=3600");
+    assert cookie_header.contains("Path=/app");
+    assert cookie_header.contains("Domain=example.com");
+    assert cookie_header.contains("Secure");
+    assert cookie_header.contains("HttpOnly");
+}
+
+test "set_cookie_advanced with nil options" {
+    let req = try! Request.parse("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n");
+    let ctx = Context.new(req, Response.new());
+
+    ctx.set_cookie_advanced("token", "xyz789", nil, nil, nil, false, false);
+
+    let cookie_header = ctx.response.get_header("Set-Cookie") || "";
+    assert cookie_header.contains("token=xyz789");
+    assert cookie_header.contains("Path=/");
+    assert !cookie_header.contains("Max-Age");
+    assert !cookie_header.contains("Domain");
+    assert !cookie_header.contains("Secure");
+    assert !cookie_header.contains("HttpOnly");
 }

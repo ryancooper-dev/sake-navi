@@ -1,0 +1,84 @@
+// 测试 Worker 与 TCP 连接的集成
+// 这是 Sake 并行处理的关键验证
+// 运行: navi run test_worker_tcp.nv
+
+use std.vm;
+use std.worker.Worker;
+use std.net.{TcpListener, TcpConnection};
+use std.net.http.client;
+use std.time;
+
+fn main() throws {
+    println("=== Worker + TCP 集成测试 ===\n");
+    
+    // 启动测试服务器
+    let listener = try TcpListener.bind("127.0.0.1:0");
+    let addr = try listener.tcp_addr();
+    println(`服务器启动: ${addr}`);
+    
+    // 方案 A: 测试 WorkerPool 处理请求
+    println("\n测试 1: WorkerPool 请求处理");
+    test_worker_pool_request();
+    
+    // 方案 B: 测试跨线程传递连接 (如果支持)
+    println("\n测试 2: Worker 内处理连接");
+    try test_worker_connection(listener);
+    
+    println("\n=== 测试完成 ===");
+}
+
+fn test_worker_pool_request() {
+    // 模拟请求处理
+    let pool = try! Worker.pool(|req| {
+        // 模拟请求处理
+        let tid = Worker.thread_id();
+        return `处理完成 by thread ${tid}: ${req}`;
+    }, vm.num_cpus());
+    
+    let results = try! pool.map_array([
+        "GET /",
+        "GET /api/users",
+        "POST /api/data",
+        "GET /health",
+    ]);
+    
+    for (let r in results) {
+        println(`  ${r}`);
+    }
+    println("  ✅ WorkerPool 请求处理正常");
+}
+
+fn test_worker_connection(listener: TcpListener) throws {
+    // 在后台启动客户端
+    spawn {
+        time.sleep(0.1.seconds());
+        // 简单连接测试
+        let resp = try? client.get(`http://127.0.0.1:${try! listener.tcp_addr().port()}/`);
+        if (let r = resp) {
+            println(`  客户端收到响应: ${r.status()}`);
+        }
+    }
+    
+    // 创建处理连接的 Worker
+    let handler = try Worker.create(|w| {
+        // 等待连接信号
+        let signal = try w.recv::<string>();
+        println(`  Worker 收到信号: ${signal}`);
+        try w.send("处理完成");
+    });
+    
+    // 接受连接
+    println("  等待连接...");
+    
+    // 设置超时
+    spawn {
+        time.sleep(1.seconds());
+        println("  超时，跳过连接测试");
+    }
+    
+    // 通知 Worker
+    try handler.send("有新连接");
+    let result = try handler.recv::<string>();
+    println(`  ${result}`);
+    println("  ✅ Worker 通信正常");
+}

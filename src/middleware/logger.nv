@@ -1,115 +1,163 @@
-/// Logger Middleware
+/// Logger middleware for request logging
 ///
-/// Logs HTTP requests and responses with timing information.
-///
-/// # Example
-/// ```nv
-/// use sake.middleware.logger;
-///
-/// app.use(logger());
-/// ```
+/// Logs HTTP requests with method, path, status, duration, and response size.
+/// Provides colorized output for different status codes.
 
 use std.time;
-use context.{Context, HandlerFunc};
+use sake.context.{Context, HandlerFunc};
+use sake.request.Request;
 
-/// Create logger middleware
+/// ANSI color codes for terminal output
+let COLOR_RESET = "\x1b[0m";
+let COLOR_GREEN = "\x1b[32m";
+let COLOR_YELLOW = "\x1b[33m";
+let COLOR_RED = "\x1b[31m";
+let COLOR_CYAN = "\x1b[36m";
+let COLOR_WHITE = "\x1b[37m";
+
+/// Logger middleware configuration
+pub struct LoggerConfig {
+    /// Whether to use colored output
+    pub use_colors: bool = true,
+
+    /// Whether to log request details
+    pub log_requests: bool = true,
+}
+
+impl LoggerConfig {
+    /// Create default logger configuration
+    pub fn with_defaults(): LoggerConfig {
+        return LoggerConfig {
+            use_colors: true,
+            log_requests: true,
+        };
+    }
+
+    /// Disable colored output
+    pub fn without_colors(self): LoggerConfig {
+        self.use_colors = false;
+        return self;
+    }
+}
+
+/// Create logger middleware with default configuration
 ///
-/// Logs each request with method, path, status code, and duration.
+/// Logs each request with:
+/// - HTTP method and path
+/// - Status code (colored by status)
+/// - Response time in milliseconds
 ///
 /// # Example
 /// ```nv
 /// app.use(logger());
-/// // Output: [2024-01-28 10:30:45] GET /users/123 -> 200 OK (12ms)
 /// ```
 pub fn logger(): HandlerFunc {
-    return |ctx: Context| {
-        let start = time.Instant.now();
-        let method = ctx.method();
-        let path = ctx.path();
-
-        println(`[${format_time()}] ${method} ${path}`);
-
-        // Execute handler chain
-        try ctx.next();
-
-        let duration = start.elapsed();
-        let status = ctx.response.status_code;
-        let status_text = get_status_text(status);
-
-        println(`   -> ${status} ${status_text} (${duration.as_millis()}ms)`);
-    };
+    return logger_with_config(LoggerConfig.with_defaults());
 }
 
-/// Create colored logger middleware
+/// Create logger middleware with custom configuration
 ///
-/// Logs with colored output based on status code.
-pub fn logger_colored(): HandlerFunc {
-    return |ctx: Context| {
-        let start = time.Instant.now();
+/// # Example
+/// ```nv
+/// let config = LoggerConfig.with_defaults().without_colors();
+/// app.use(logger_with_config(config));
+/// ```
+pub fn logger_with_config(config: LoggerConfig): HandlerFunc {
+    return |ctx| {
+        if (!config.log_requests) {
+            try ctx.next();
+            return;
+        }
+
+        // Record start time
+        let start = time.now();
+
+        // Get request info
         let method = ctx.method();
         let path = ctx.path();
 
         // Execute handler chain
         try ctx.next();
 
-        let duration = start.elapsed();
-        let status = ctx.response.status_code;
+        // Calculate duration
+        let end = time.now();
+        let duration_ms = (end - start) * 1000.0;
 
-        // Color based on status
-        let color = if (status >= 500) {
-            "\x1b[31m"  // Red
-        } else if (status >= 400) {
-            "\x1b[33m"  // Yellow
-        } else if (status >= 300) {
-            "\x1b[36m"  // Cyan
+        // Get response status (default 200 if not set)
+        let status = ctx.response.status_code || 200;
+
+        // Get response size
+        let size = ctx.response.body.len();
+
+        // Format and print log
+        if (config.use_colors) {
+            print_colored_log(method, path, status, duration_ms, size);
         } else {
-            "\x1b[32m"  // Green
-        };
-
-        let reset = "\x1b[0m";
-
-        println(`${color}[${format_time()}] ${method} ${path} -> ${status} (${duration.as_millis()}ms)${reset}`);
+            print_plain_log(method, path, status, duration_ms, size);
+        }
     };
 }
 
-/// Format current time
-fn format_time(): string {
-    let now = time.now();
-    // Simplified time format
-    return now.to_string();
+/// Print colored log line
+fn print_colored_log(method: string, path: string, status: int, duration_ms: float, size: int) {
+    let status_color = get_status_color(status);
+    let method_color = COLOR_CYAN;
+    let reset = COLOR_RESET;
+
+    // Format duration to 2 decimal places manually
+    let duration_str = `${duration_ms}`;
+    println(`${method_color}${method}${reset} ${path} ${status_color}${status}${reset} ${duration_str}ms ${size} bytes`);
 }
 
-/// Get status text for HTTP status code
-fn get_status_text(code: int): string {
-    if (code >= 200 && code < 300) {
-        return "OK";
-    } else if (code >= 300 && code < 400) {
-        return "Redirect";
-    } else if (code >= 400 && code < 500) {
-        return "Client Error";
-    } else if (code >= 500) {
-        return "Server Error";
+/// Print plain log line (no colors)
+fn print_plain_log(method: string, path: string, status: int, duration_ms: float, size: int) {
+    // Format duration to string
+    let duration_str = `${duration_ms}`;
+    println(`${method} ${path} ${status} ${duration_str}ms ${size} bytes`);
+}
+
+/// Get color based on status code
+fn get_status_color(status: int): string {
+    if (status >= 200 && status < 300) {
+        return COLOR_GREEN;
+    } else if (status >= 300 && status < 400) {
+        return COLOR_CYAN;
+    } else if (status >= 400 && status < 500) {
+        return COLOR_YELLOW;
+    } else if (status >= 500) {
+        return COLOR_RED;
     }
-    return "Unknown";
+    return COLOR_WHITE;
 }
 
 // ============================================
 // Tests
 // ============================================
 
-test "logger middleware" {
-    use request.Request;
+test "logger middleware logs request" {
+    let request = try! Request.parse("GET /test HTTP/1.1\r\n\r\n");
 
-    let req = try! Request.parse("GET /test HTTP/1.1\r\nHost: localhost\r\n\r\n");
-
-    let test_handler = |ctx: Context| {
-        ctx.status(200).string("OK");
+    let handler = |ctx| {
+        ctx.string("OK");
     };
 
-    let handlers = [logger(), test_handler];
-    let ctx = Context.with_handlers(req, handlers, {:});
-
+    let ctx = Context.with_handlers(request, [logger(), handler], {:});
     try! ctx.next();
 
-    assert_eq ctx.response.status_code, 200;
+    // Verify handler executed
+    assert ctx.response.body.contains("OK");
+}
+
+test "logger config without colors" {
+    let config = LoggerConfig.with_defaults().without_colors();
+
+    assert_eq config.use_colors, false;
+    assert_eq config.log_requests, true;
+}
+
+test "status color mapping" {
+    assert_eq get_status_color(200), COLOR_GREEN;
+    assert_eq get_status_color(301), COLOR_CYAN;
+    assert_eq get_status_color(404), COLOR_YELLOW;
+    assert_eq get_status_color(500), COLOR_RED;
 }

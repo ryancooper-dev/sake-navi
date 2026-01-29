@@ -46,6 +46,55 @@ Use speckit commands in order:
 - Shared mutable state (use channels)
 - Any dependencies outside std library
 
+## Quality Assurance
+
+### Mandatory Checks Before Committing
+
+**CRITICAL**: Every code change MUST pass these checks:
+
+1. **Compilation Check**
+   ```bash
+   ~/.navi/navi compile
+   ```
+   - MUST compile without errors
+   - Fix all syntax errors immediately
+   - Verify all imports are correct
+
+2. **Test Execution**
+   ```bash
+   ~/.navi/navi test
+   ```
+   - ALL tests MUST pass
+   - No skipped or failing tests allowed
+   - Add tests for new features
+
+### Navi Language Resources
+
+When encountering Navi syntax issues, consult these resources **IN ORDER**:
+
+1. **Navi Skill** (Local)
+   - Location: `.claude/skills/navi/SKILL.md`
+   - References: `.claude/skills/navi/references/*.md`
+   - Quick reference for syntax, patterns, and idioms
+
+2. **Navi GitHub Repository**
+   - Syntax References: https://github.com/navi-language/navi/tree/main/.claude/skills/navi/references
+   - Example Code: https://github.com/navi-language/navi/tree/main/.claude/skills/navi/examples
+   - Official test suite examples
+
+3. **Standard Library Documentation**
+   - Documentation: https://navi-lang.org/stdlib/
+   - API reference for std library modules
+   - Usage examples for built-in functions
+
+### Common Navi Syntax Issues
+
+- **Module imports**: Use `use module.Type;` not `use module::Type;`
+- **Error handling**: `try?` returns `nil` on error (for functions that throw)
+- **Validation**: Functions that throw have no return value when using `try?`
+- **Testing**: Use `test "name" { }` blocks inline or in separate test files
+- **Module structure**: Files at project root become modules automatically
+
 ## File Structure
 
 ```
@@ -83,3 +132,42 @@ codex -m o3 "Review this Navi code for the navi-web framework. Check for:
 4. Performance concerns
 5. Documentation quality"
 ```
+
+## Current Task: Gin Parity Implementation
+
+### Goal
+Achieve 100% Gin feature parity with production-quality code, tests, and documentation.
+
+### CRITICAL Requirements
+1. **Every change must compile**: Run `navi compile` before committing
+2. **All tests must pass**: Run `navi test sake/` after every change
+3. **Follow Gin API design**: Match Gin's naming and patterns
+4. **Comprehensive tests**: Match Gin's test coverage for each feature
+5. **Documentation**: API docs, examples, and checklist updates
+
+### Workflow for Each Feature
+1. Check Gin docs/tests for the feature
+2. Create tests first (TDD): `tests/test_<feature>.nv`
+3. Implement until tests pass
+4. Add example: `examples/<feature>.nv`
+5. Update `docs/gin-parity-checklist.md`
+6. Commit with descriptive message
+
+### Priority Checklist
+🔲 Request Binding (bind_form, bind_query, validation)
+🔲 File responses (ctx.file, streaming)
+🔲 Advanced routing (optional params if possible)
+🔲 Additional Context helpers
+🔲 Performance optimizations
+🔲 Complete test coverage (>90%)
+
+### Navi Resources
+- Skill: `.claude/skills/navi/SKILL.md`
+- References: `.claude/skills/navi/references/*.md`
+- Examples: `.claude/skills/navi/examples/*.nv`
+- Stdlib: https://navi-lang.org/stdlib/
+
+### Quality Gates
+- Compile: `navi compile main.nv`
+- Tests: `navi test sake/`
+- Review: `codex review --base origin/main`

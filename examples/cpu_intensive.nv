@@ -1,0 +1,93 @@
+/// CPU-Intensive Example
+///
+/// Demonstrates WorkerPool usage for CPU-bound routes
+/// Routes marked with .worker() execute in parallel across CPU cores
+
+use sake.Engine;
+use sake.Config;
+
+/// Compute fibonacci number (CPU-intensive)
+fn fibonacci(n: int): int {
+    if (n <= 1) {
+        return n;
+    }
+    return fibonacci(n - 1) + fibonacci(n - 2);
+}
+
+/// Compute factorial (CPU-intensive)
+fn factorial(n: int): int {
+    if (n <= 1) {
+        return 1;
+    }
+    return n * factorial(n - 1);
+}
+
+fn main() throws {
+    let config = Config.with_defaults()
+        .with_worker_pool_size(0);  // Auto-detect CPU count
+
+    let app = Engine.new(config);
+
+    // Regular I/O-bound route (uses spawn)
+    app.get("/", |ctx| {
+        ctx.string("CPU-Intensive Demo 🍶");
+    });
+
+    // CPU-intensive route (uses WorkerPool)
+    app.get("/fibonacci/:n", |ctx| {
+        let n_str = ctx.param("n") || "10";
+        let n = try? n_str.parse::<int>() || 10;
+
+        if (n > 40) {
+            ctx.status(400).string("Number too large (max 40)");
+            return;
+        }
+
+        let result = fibonacci(n);
+
+        try? ctx.json({
+            "n": n,
+            "fibonacci": result,
+            "computed_in": "worker_pool",
+        });
+    }).worker();  // ← Mark for WorkerPool execution
+
+    // Another CPU-intensive route
+    app.get("/factorial/:n", |ctx| {
+        let n_str = ctx.param("n") || "10";
+        let n = try? n_str.parse::<int>() || 10;
+
+        if (n > 20) {
+            ctx.status(400).string("Number too large (max 20)");
+            return;
+        }
+
+        let result = factorial(n);
+
+        try? ctx.json({
+            "n": n,
+            "factorial": result,
+            "computed_in": "worker_pool",
+        });
+    }).worker();
+
+    // Benchmark route (non-worker for comparison)
+    app.get("/benchmark/:n", |ctx| {
+        let n_str = ctx.param("n") || "30";
+        let n = try? n_str.parse::<int>() || 30;
+
+        let result = fibonacci(n);
+
+        try? ctx.json({
+            "n": n,
+            "result": result,
+            "computed_in": "spawn_mode",
+        });
+    });
+
+    println("Starting CPU-Intensive server...");
+    println("Try:");
+    println("  http://localhost:8080/fibonacci/35  (parallel)");
+    println("  http://localhost:8080/benchmark/35  (concurrent)");
+    try app.run(":8080");
+}

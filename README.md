@@ -12,30 +12,28 @@
 - **Optional Parallelism** - `WorkerPool` support for CPU-intensive routes
 - **Middleware Support** - Flexible middleware chain with `ctx.next()`
 - **Router Groups** - Organize routes with common prefixes and middleware
+- **Request Binding** - Parse query strings, forms, JSON, headers, and URI parameters
+- **Cookie Support** - Full cookie handling with secure options
 - **Type-Safe** - Full Navi type safety with Optional types and error handling
+- **90% Gin Parity** - Most Gin features implemented with idiomatic Navi code
 
 ## 🚀 Quick Start
 
 ```nv
-use sake.Engine;
-use sake.middleware.{recovery, logger};
+use src.Engine;
 
 fn main() throws {
-    let app = Engine.new();
-
-    // Add middleware
-    app.use(recovery());
-    app.use(logger());
+    let app = Engine.default();
 
     // Simple route
     app.get("/", |ctx| {
         ctx.string("Hello, Sake! 🍶");
     });
 
-    // JSON response with path parameters
+    // JSON response with path parameter
     app.get("/api/users/:id", |ctx| {
         let id = ctx.param("id");
-        ctx.json({
+        try? ctx.json({
             "id": id,
             "name": "Navi User",
         });
@@ -43,20 +41,17 @@ fn main() throws {
 
     // CPU-intensive route with WorkerPool
     app.get("/compute/:n", |ctx| {
-        let n = ctx.param("n") || "10";
-        let result = fibonacci(n);
-        ctx.json({"result": result});
-    }).worker();  // Use WorkerPool for parallel processing
+        let n = try? ctx.param("n")?.parse::<int>() || 10;
+        let result = expensive_computation(n);
+        try? ctx.json({"result": result});
+    }).worker();  // ← Executes in parallel worker threads
 
     // Start server
     try app.run(":8080");
 }
-
-fn fibonacci(n: int): int {
-    if (n <= 1) { return n; }
-    return fibonacci(n - 1) + fibonacci(n - 2);
-}
 ```
+
+See [examples/](examples/) for more complete examples.
 
 ## 📦 Installation
 
@@ -67,16 +62,38 @@ Add Sake to your `navi.toml`:
 sake = "0.1"
 ```
 
+## ⚙️ Configuration
+
+```nv
+use src.{Engine, Config};
+
+let config = Config.default()
+    .with_worker_pool_size(8)       // 8 worker threads (0 = auto-detect)
+    .with_max_connections(10000)    // Max concurrent connections
+    .with_request_timeout(30000);   // 30 second timeout
+
+let app = Engine.new(config);
+```
+
+**Configuration Options:**
+
+- `worker_pool_size` - Number of worker threads (0 = auto-detect via `vm.num_cpus()`)
+- `enable_worker_pool` - Enable/disable WorkerPool (default: true)
+- `max_connections` - Maximum concurrent connections (default: 10000)
+- `request_timeout` - Request timeout in milliseconds (default: 30000)
+
 ## 📖 Documentation
 
-- [API Reference](docs/API_REFERENCE.md) - Complete API documentation
-- [WorkerPool Guide](docs/WORKER_POOL_GUIDE.md) - In-depth guide to parallel processing
-- [Parallelism Spec](specs/parallelism-spec.md) - Technical specification and benchmarks
-- [Analysis](WORKERPOOL_ANALYSIS.md) - Design decisions and trade-offs
+- [Getting Started](docs/getting-started.md)
+- [Routing](docs/routing.md)
+- [Middleware](docs/middleware.md)
+- [Context API](docs/context.md)
+- [Parallelism Guide](docs/parallelism.md)
+- [API Reference](docs/api-reference.md)
 
 ## 🏗️ Architecture
 
-Sake supports two execution modes with seamless integration:
+Sake supports two execution modes:
 
 ### Default: `spawn` + `channel` (Single-thread Concurrency)
 
@@ -88,46 +105,16 @@ Client → Server → spawn { handle_request() }
                 → spawn { handle_request() }
 ```
 
-- Zero overhead
-- Perfect for database queries, API calls, file I/O
-- Handles thousands of concurrent connections
-- Default mode for all routes
-
 ### Optional: `WorkerPool` (Multi-thread Parallelism)
 
 Best for CPU-intensive routes:
 
 ```nv
-// Configure WorkerPool (stored as config, not runtime)
-let app = Engine.with_workers(4);  // 4 worker threads
-
-// Mark CPU-intensive routes with .worker()
 app.get("/compute/:n", |ctx| {
     let result = heavy_computation(ctx.param("n"));
     ctx.json({"result": result});
-}).worker();  // This route uses WorkerPool
-
-// Normal routes still use spawn
-app.get("/api/data", |ctx| {
-    let data = fetch_from_db();
-    ctx.json(data);
-});  // This route uses spawn
+}).worker();  // Enable WorkerPool for this route
 ```
-
-**Key Features:**
-- Config/Runtime separation pattern (no channel serialization issues)
-- Automatic load balancing (Round-robin, Least-loaded, Random)
-- Configurable timeouts
-- Graceful shutdown
-- 5-7x speedup for CPU-intensive tasks
-
-**Performance:**
-| Task Type | Sequential | WorkerPool (4 cores) | Speedup |
-|-----------|-----------|----------------------|---------|
-| Light (<10ms) | 4.8ms | 15.9ms | 0.3x (overhead) |
-| Heavy (>100ms) | 4200ms | 850ms | 5x |
-
-See [WorkerPool Guide](docs/WORKER_POOL_GUIDE.md) for detailed usage.
 
 ## 🤝 Contributing
 

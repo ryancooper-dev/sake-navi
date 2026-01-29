@@ -1,0 +1,213 @@
+/// Cookie Handling Example
+///
+/// Demonstrates cookie management in Sake:
+/// - Reading cookies from requests
+/// - Setting simple cookies
+/// - Setting cookies with advanced options
+/// - Session-based authentication
+/// - Cookie-based preferences
+
+use sake.Engine;
+
+fn main() throws {
+    let app = Engine.with_defaults();
+
+    // Example 1: Read cookies from request
+    // GET / with Cookie: theme=dark; lang=en
+    app.get("/", |ctx| {
+        let theme = ctx.cookie("theme") || "light";
+        let lang = ctx.cookie("lang") || "en";
+
+        try? ctx.json({
+            "message": "Welcome!",
+            "theme": theme,
+            "language": lang,
+        });
+    });
+
+    // Example 2: Set simple cookies
+    // GET /set-theme?theme=dark
+    app.get("/set-theme", |ctx| {
+        let theme = ctx.query("theme") || "light";
+        ctx.set_cookie("theme", theme);
+
+        try? ctx.json({
+            "message": "Theme preference saved",
+            "theme": theme,
+        });
+    });
+
+    // Example 3: Set language preference with path
+    // GET /set-language?lang=en
+    app.get("/set-language", |ctx| {
+        let lang = ctx.query("lang") || "en";
+
+        // Cookie valid for 30 days, on all paths, HTTP only
+        ctx.set_cookie_advanced(lang, "lang", 2592000, "/", nil, false, true);
+
+        try? ctx.json({
+            "message": "Language preference saved",
+            "language": lang,
+        });
+    });
+
+    // Example 4: Login and create session
+    // POST /login
+    // Body: username=alice&password=secret
+    app.post("/login", |ctx| {
+        let form_result = try? ctx.bind_form();
+
+        if (let form = form_result) {
+            let username = form.get("username") || "";
+            let password = form.get("password") || "";
+
+            // Simple authentication (replace with real auth)
+            if (username == "alice" && password == "secret") {
+                // Generate session ID (in production, use secure random)
+                let session_id = `session_${username}_123456`;
+
+                // Set secure session cookie
+                // - 1 hour expiry (3600 seconds)
+                // - Path: /
+                // - Secure: true (HTTPS only in production)
+                // - HttpOnly: true (not accessible via JavaScript)
+                ctx.set_cookie_advanced(session_id, "session_id", 3600, "/", nil, false, true);
+
+                ctx.status(200);
+                try? ctx.json({
+                    "success": true,
+                    "message": "Login successful",
+                    "user": username,
+                });
+            } else {
+                ctx.status(401);
+                try? ctx.json({
+                    "success": false,
+                    "message": "Invalid credentials",
+                });
+            }
+        } else {
+            ctx.abort_with_error(400, "Invalid form data");
+        }
+    });
+
+    // Example 5: Protected route that requires session
+    // GET /profile
+    app.get("/profile", |ctx| {
+        let session = ctx.cookie("session_id");
+
+        if (let session_id = session) {
+            // Verify session (in production, check against session store)
+            if (session_id.starts_with("session_")) {
+                try? ctx.json({
+                    "user": "alice",
+                    "email": "alice@example.com",
+                    "preferences": {
+                        "theme": ctx.cookie("theme") || "light",
+                        "lang": ctx.cookie("lang") || "en",
+                    },
+                });
+            } else {
+                ctx.status(401);
+                try? ctx.json({
+                    "error": "Invalid session",
+                });
+            }
+        } else {
+            ctx.status(401);
+            try? ctx.json({
+                "error": "Not authenticated",
+            });
+        }
+    });
+
+    // Example 6: Logout and clear session
+    // POST /logout
+    app.post("/logout", |ctx| {
+        // Clear session cookie by setting Max-Age=0
+        ctx.set_cookie_advanced("", "session_id", 0, "/", nil, false, true);
+
+        try? ctx.json({
+            "success": true,
+            "message": "Logged out successfully",
+        });
+    });
+
+    // Example 7: Cookie consent
+    // POST /cookie-consent
+    app.post("/cookie-consent", |ctx| {
+        // Set cookie consent for 1 year
+        let one_year = 365 * 24 * 60 * 60;  // seconds
+        ctx.set_cookie_advanced("true", "cookie_consent", one_year, "/", nil, false, false);
+
+        try? ctx.json({
+            "message": "Cookie consent saved",
+        });
+    });
+
+    // Example 8: Check cookie consent
+    // GET /check-consent
+    app.get("/check-consent", |ctx| {
+        let consent = ctx.cookie("cookie_consent");
+        let has_consent = consent == "true";
+
+        try? ctx.json({
+            "has_consent": has_consent,
+        });
+    });
+
+    // Example 9: Shopping cart in cookies (simple example)
+    // POST /cart/add?item=widget
+    app.post("/cart/add", |ctx| {
+        let item = ctx.query("item") || "";
+        let cart = ctx.cookie("cart") || "";
+
+        // Add item to cart (comma-separated list)
+        let new_cart = "";
+        if (cart.len() > 0) {
+            new_cart = `${cart},${item}`;
+        } else {
+            new_cart = item;
+        }
+
+        // Save cart cookie for 7 days
+        let seven_days = 7 * 24 * 60 * 60;
+        ctx.set_cookie_advanced(new_cart, "cart", seven_days, "/", nil, false, false);
+
+        try? ctx.json({
+            "message": "Item added to cart",
+            "cart": new_cart.split(","),
+        });
+    });
+
+    // Example 10: View cart
+    // GET /cart
+    app.get("/cart", |ctx| {
+        let cart = ctx.cookie("cart") || "";
+        let items: [string] = [];
+
+        if (cart.len() > 0) {
+            items = cart.split(",");
+        }
+
+        try? ctx.json({
+            "items": items,
+            "count": items.len(),
+        });
+    });
+
+    println("Cookie Example Server");
+    println("====================");
+    println("");
+    println("Try these examples:");
+    println("  GET  http://localhost:8080/ (view theme/lang cookies)");
+    println("  GET  http://localhost:8080/set-theme?theme=dark");
+    println("  POST http://localhost:8080/login (form: username=alice&password=secret)");
+    println("  GET  http://localhost:8080/profile (requires login)");
+    println("  POST http://localhost:8080/logout");
+    println("  POST http://localhost:8080/cart/add?item=widget");
+    println("  GET  http://localhost:8080/cart");
+    println("");
+
+    try app.run(":8080");
+}
