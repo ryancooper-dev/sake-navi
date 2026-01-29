@@ -20,28 +20,52 @@ use response.Response;
 /// All handlers and middleware use this signature
 pub type HandlerFunc = |(ctx: Context) throws|;
 
+/// Query parameter result with existence check
+pub struct QueryResult {
+    /// The parameter value (empty string if not found)
+    value: string,
+
+    /// Whether the parameter exists
+    exists: bool,
+}
+
+/// Form parameter result with existence check
+pub struct FormResult {
+    /// The parameter value (empty string if not found)
+    value: string,
+
+    /// Whether the parameter exists
+    exists: bool,
+}
+
 /// Request context - the primary interface for handlers
 struct Context {
     /// The incoming HTTP request
     request: Request,
-    
+
     /// The outgoing HTTP response
     response: Response,
-    
+
     /// Path parameters extracted from route (e.g., :id)
     params: <string, string>,
-    
+
     /// Handler chain (middleware + final handler)
     handlers: [HandlerFunc],
-    
+
     /// Current index in handler chain
     index: int = -1,
-    
+
     /// Key-value store for passing data between middleware
     keys: <string, any>,
-    
+
     /// Whether the handler chain was aborted
     aborted: bool = false,
+
+    /// Cached form data (parsed on first access)
+    form_data: <string, string>?,
+
+    /// Cached cookies (parsed on first access)
+    cookies: <string, string>?,
 }
 
 impl Context {
@@ -53,9 +77,11 @@ impl Context {
             params: {:},
             handlers: [],
             keys: {:},
+            form_data: nil,
+            cookies: nil,
         };
     }
-    
+
     /// Create context with handlers
     pub fn with_handlers(request: Request, handlers: [HandlerFunc], params: <string, string>): Context {
         return Context {
@@ -64,6 +90,8 @@ impl Context {
             params,
             handlers,
             keys: {:},
+            form_data: nil,
+            cookies: nil,
         };
     }
     
@@ -89,13 +117,13 @@ impl Context {
     }
     
     /// Get query parameter by name
-    /// 
+    ///
     /// # Arguments
     /// * `name` - Query parameter name
-    /// 
+    ///
     /// # Returns
     /// Parameter value or nil if not found
-    /// 
+    ///
     /// # Example
     /// ```nv
     /// // URL: /users?page=2&limit=10
@@ -103,6 +131,41 @@ impl Context {
     /// ```
     pub fn query(self, name: string): string? {
         return self.request.query(name);
+    }
+
+    /// Get query parameter with existence check
+    ///
+    /// # Arguments
+    /// * `name` - Query parameter name
+    ///
+    /// # Returns
+    /// QueryResult with value and exists flag
+    ///
+    /// # Example
+    /// ```nv
+    /// // URL: /users?page=2
+    /// let page_result = ctx.get_query("page");
+    /// if (page_result.exists) {
+    ///     println(`Page: ${page_result.value}`);
+    /// }
+    ///
+    /// let limit_result = ctx.get_query("limit");
+    /// if (!limit_result.exists) {
+    ///     println("No limit specified");
+    /// }
+    /// ```
+    pub fn get_query(self, name: string): QueryResult {
+        let value = self.request.query(name);
+        if (value != nil) {
+            return QueryResult {
+                value: value!,
+                exists: true,
+            };
+        }
+        return QueryResult {
+            value: "",
+            exists: false,
+        };
     }
     
     /// Get request header by name
@@ -133,6 +196,138 @@ impl Context {
     /// Get Content-Type of request
     pub fn content_type(self): string? {
         return self.request.content_type();
+    }
+
+    /// Parse form data from request body
+    ///
+    /// Lazily parses application/x-www-form-urlencoded data on first access
+    fn parse_form_data(self) {
+        if (self.form_data != nil) {
+            return;  // Already parsed
+        }
+
+        self.form_data = {:};
+
+        // Check if content type is form data
+        let ct = self.content_type();
+        if (ct == nil || !ct!.contains("application/x-www-form-urlencoded")) {
+            return;
+        }
+
+        // Parse form data (key1=value1&key2=value2)
+        let body = self.request.body;
+        if (body.len() == 0) {
+            return;
+        }
+
+        let pairs = body.split("&");
+        for (let pair in pairs) {
+            let parts = pair.split("=");
+            if (parts.len() == 2) {
+                let key = self.url_decode(parts[0]);
+                let value = self.url_decode(parts[1]);
+                self.form_data![key] = value;
+            }
+        }
+    }
+
+    /// Simple URL decode
+    fn url_decode(self, s: string): string {
+        // TODO: Implement proper URL decoding
+        // For now, just replace + with space
+        return s.replace("+", " ");
+    }
+
+    /// Get POST form parameter by name
+    ///
+    /// # Arguments
+    /// * `name` - Form field name
+    ///
+    /// # Returns
+    /// Parameter value or nil if not found
+    ///
+    /// # Example
+    /// ```nv
+    /// // POST body: name=Alice&email=alice@example.com
+    /// let name = ctx.post_form("name") || "Anonymous";
+    /// ```
+    pub fn post_form(self, name: string): string? {
+        self.parse_form_data();
+        return self.form_data!.get(name);
+    }
+
+    /// Get POST form parameter with existence check
+    ///
+    /// # Arguments
+    /// * `name` - Form field name
+    ///
+    /// # Returns
+    /// FormResult with value and exists flag
+    ///
+    /// # Example
+    /// ```nv
+    /// let name_result = ctx.get_post_form("name");
+    /// if (name_result.exists) {
+    ///     println(`Name: ${name_result.value}`);
+    /// }
+    /// ```
+    pub fn get_post_form(self, name: string): FormResult {
+        self.parse_form_data();
+        let value = self.form_data!.get(name);
+        if (value != nil) {
+            return FormResult {
+                value: value!,
+                exists: true,
+            };
+        }
+        return FormResult {
+            value: "",
+            exists: false,
+        };
+    }
+
+    /// Parse cookies from request headers
+    fn parse_cookies(self) {
+        if (self.cookies != nil) {
+            return;  // Already parsed
+        }
+
+        self.cookies = {:};
+
+        let cookie_header = self.header("Cookie");
+        if (cookie_header == nil) {
+            return;
+        }
+
+        // Parse cookies (key1=value1; key2=value2)
+        let pairs = cookie_header!.split(";");
+        for (let pair in pairs) {
+            let trimmed = pair.trim();
+            let parts = trimmed.split("=");
+            if (parts.len() == 2) {
+                self.cookies![parts[0].trim()] = parts[1].trim();
+            }
+        }
+    }
+
+    /// Get cookie value by name
+    ///
+    /// # Arguments
+    /// * `name` - Cookie name
+    ///
+    /// # Returns
+    /// Cookie value or nil if not found
+    ///
+    /// # Example
+    /// ```nv
+    /// let session = ctx.cookie("session_id");
+    /// if (session != nil) {
+    ///     println(`Session: ${session!}`);
+    /// }
+    /// ```
+    pub fn cookie(self, name: string): string? {
+        self.parse_cookies();
+        return self.cookies!.get(name);
     }
     
     // ============================================
@@ -181,6 +376,77 @@ impl Context {
     pub fn set_header(self, name: string, value: string): Context {
         self.response.header(name, value);
         return self;
+    }
+
+    /// Set cookie in response
+    ///
+    /// # Arguments
+    /// * `name` - Cookie name
+    /// * `value` - Cookie value
+    /// * `max_age` - Max age in seconds (0 = session cookie)
+    /// * `path` - Cookie path (default: "/")
+    /// * `domain` - Cookie domain (empty = current domain)
+    /// * `secure` - Secure flag (HTTPS only)
+    /// * `http_only` - HttpOnly flag (no JavaScript access)
+    ///
+    /// # Example
+    /// ```nv
+    /// // Simple session cookie
+    /// ctx.set_cookie("session_id", "abc123", 0, "/", "", false, true);
+    ///
+    /// // Cookie with 1 hour expiry
+    /// ctx.set_cookie("token", "xyz789", 3600, "/", "", true, true);
+    /// ```
+    pub fn set_cookie(
+        self,
+        name: string,
+        value: string,
+        max_age: int,
+        path: string,
+        domain: string,
+        secure: bool,
+        http_only: bool
+    ): Context {
+        let cookie = `${name}=${value}`;
+
+        if (path.len() > 0) {
+            cookie = cookie + `; Path=${path}`;
+        } else {
+            cookie = cookie + "; Path=/";
+        }
+
+        if (domain.len() > 0) {
+            cookie = cookie + `; Domain=${domain}`;
+        }
+
+        if (max_age > 0) {
+            cookie = cookie + `; Max-Age=${max_age}`;
+        }
+
+        if (secure) {
+            cookie = cookie + "; Secure";
+        }
+
+        if (http_only) {
+            cookie = cookie + "; HttpOnly";
+        }
+
+        self.response.header("Set-Cookie", cookie);
+        return self;
+    }
+
+    /// Set simple cookie with default options
+    ///
+    /// # Arguments
+    /// * `name` - Cookie name
+    /// * `value` - Cookie value
+    ///
+    /// # Example
+    /// ```nv
+    /// ctx.set_simple_cookie("user", "alice");
+    /// ```
+    pub fn set_simple_cookie(self, name: string, value: string): Context {
+        return self.set_cookie(name, value, 0, "/", "", false, false);
     }
     
     /// Send JSON response
@@ -388,7 +654,87 @@ test "path params" {
     let req = try! Request.parse("GET /users/123 HTTP/1.1\r\nHost: localhost\r\n\r\n");
     let params: <string, string> = {"id": "123"};
     let ctx = Context.with_handlers(req, [], params);
-    
+
     assert_eq ctx.param("id"), "123";
     assert_eq ctx.param("missing"), nil;
+}
+
+test "get_query with existence check" {
+    let req = try! Request.parse("GET /test?page=2&limit=10 HTTP/1.1\r\nHost: localhost\r\n\r\n");
+    let ctx = Context.new(req, Response.new());
+
+    let page_result = ctx.get_query("page");
+    assert_eq page_result.exists, true;
+    assert_eq page_result.value, "2";
+
+    let missing_result = ctx.get_query("offset");
+    assert_eq missing_result.exists, false;
+    assert_eq missing_result.value, "";
+}
+
+test "post_form parsing" {
+    let req = try! Request.parse("POST /submit HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/x-www-form-urlencoded\r\n\r\nname=Alice&email=alice@example.com");
+    let ctx = Context.new(req, Response.new());
+
+    let name = ctx.post_form("name");
+    assert_eq name, "Alice";
+
+    let email = ctx.post_form("email");
+    assert_eq email, "alice@example.com";
+
+    let missing = ctx.post_form("phone");
+    assert_eq missing, nil;
+}
+
+test "get_post_form with existence check" {
+    let req = try! Request.parse("POST /submit HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/x-www-form-urlencoded\r\n\r\nname=Bob&age=30");
+    let ctx = Context.new(req, Response.new());
+
+    let name_result = ctx.get_post_form("name");
+    assert_eq name_result.exists, true;
+    assert_eq name_result.value, "Bob";
+
+    let missing_result = ctx.get_post_form("email");
+    assert_eq missing_result.exists, false;
+    assert_eq missing_result.value, "";
+}
+
+test "cookie parsing" {
+    let req = try! Request.parse("GET / HTTP/1.1\r\nHost: localhost\r\nCookie: session_id=abc123; user=alice\r\n\r\n");
+    let ctx = Context.new(req, Response.new());
+
+    let session = ctx.cookie("session_id");
+    assert_eq session, "abc123";
+
+    let user = ctx.cookie("user");
+    assert_eq user, "alice";
+
+    let missing = ctx.cookie("token");
+    assert_eq missing, nil;
+}
+
+test "set_cookie" {
+    let req = try! Request.parse("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n");
+    let ctx = Context.new(req, Response.new());
+
+    ctx.set_cookie("session", "xyz789", 3600, "/", "", false, true);
+
+    let cookie_header = ctx.response.get_header("Set-Cookie");
+    assert cookie_header != nil;
+    assert cookie_header!.contains("session=xyz789");
+    assert cookie_header!.contains("Path=/");
+    assert cookie_header!.contains("Max-Age=3600");
+    assert cookie_header!.contains("HttpOnly");
+}
+
+test "set_simple_cookie" {
+    let req = try! Request.parse("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n");
+    let ctx = Context.new(req, Response.new());
+
+    ctx.set_simple_cookie("user", "alice");
+
+    let cookie_header = ctx.response.get_header("Set-Cookie");
+    assert cookie_header != nil;
+    assert cookie_header!.contains("user=alice");
+    assert cookie_header!.contains("Path=/");
 }

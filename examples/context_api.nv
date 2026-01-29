@@ -1,0 +1,179 @@
+/// Context API Example
+///
+/// Demonstrates query parameters, form data, and cookie handling.
+
+use sake.Engine;
+use sake.Context;
+
+fn main() throws {
+    let app = Engine.new();
+
+    // Query parameters with existence check
+    app.get("/search", |ctx| {
+        let query_result = ctx.get_query("q");
+        if (!query_result.exists) {
+            ctx.status(400);
+            ctx.json({"error": "Missing query parameter 'q'"});
+            return;
+        }
+
+        let page_result = ctx.get_query("page");
+        let page = if (page_result.exists) {
+            page_result.value
+        } else {
+            "1"
+        };
+
+        ctx.json({
+            "query": query_result.value,
+            "page": page,
+            "results": ["Result 1", "Result 2", "Result 3"],
+        });
+    });
+
+    // Simple query parameters (with defaults)
+    app.get("/products", |ctx| {
+        let category = ctx.query("category") || "all";
+        let sort = ctx.query("sort") || "name";
+
+        ctx.json({
+            "category": category,
+            "sort": sort,
+            "products": [],
+        });
+    });
+
+    // POST form data
+    app.post("/login", |ctx| {
+        let username_result = ctx.get_post_form("username");
+        let password_result = ctx.get_post_form("password");
+
+        if (!username_result.exists || !password_result.exists) {
+            ctx.status(400);
+            ctx.json({"error": "Missing username or password"});
+            return;
+        }
+
+        // Simulate authentication
+        if (username_result.value == "admin" && password_result.value == "secret") {
+            // Set session cookie
+            ctx.set_cookie("session_id", "abc123xyz", 3600, "/", "", false, true);
+            ctx.json({"message": "Login successful"});
+        } else {
+            ctx.status(401);
+            ctx.json({"error": "Invalid credentials"});
+        }
+    });
+
+    // Form data with optional fields
+    app.post("/register", |ctx| {
+        let email = ctx.post_form("email") || "";
+        let username = ctx.post_form("username") || "";
+        let newsletter = ctx.post_form("newsletter");  // Optional
+
+        if (email.len() == 0 || username.len() == 0) {
+            ctx.status(400);
+            ctx.json({"error": "Email and username are required"});
+            return;
+        }
+
+        ctx.status(201);
+        ctx.json({
+            "message": "User registered",
+            "email": email,
+            "username": username,
+            "newsletter": newsletter != nil,
+        });
+    });
+
+    // Cookie handling
+    app.get("/profile", |ctx| {
+        let session = ctx.cookie("session_id");
+
+        if (session == nil) {
+            ctx.status(401);
+            ctx.json({"error": "Not authenticated"});
+            return;
+        }
+
+        // Check session (simplified)
+        if (session != "abc123xyz") {
+            ctx.status(401);
+            ctx.json({"error": "Invalid session"});
+            return;
+        }
+
+        ctx.json({
+            "user": "admin",
+            "email": "admin@example.com",
+        });
+    });
+
+    // Logout - clear cookie
+    app.post("/logout", |ctx| {
+        // Set cookie with Max-Age=0 to delete it
+        ctx.set_cookie("session_id", "", 0, "/", "", false, true);
+        ctx.json({"message": "Logged out"});
+    });
+
+    // Preferences with cookies
+    app.get("/preferences", |ctx| {
+        let theme = ctx.cookie("theme") || "light";
+        let language = ctx.cookie("language") || "en";
+
+        ctx.json({
+            "theme": theme,
+            "language": language,
+        });
+    });
+
+    app.post("/preferences", |ctx| {
+        let theme = ctx.post_form("theme") || "light";
+        let language = ctx.post_form("language") || "en";
+
+        // Set preference cookies (7 days)
+        ctx.set_cookie("theme", theme, 604800, "/", "", false, false);
+        ctx.set_cookie("language", language, 604800, "/", "", false, false);
+
+        ctx.json({
+            "message": "Preferences saved",
+            "theme": theme,
+            "language": language,
+        });
+    });
+
+    // Simple cookie example
+    app.get("/visit", |ctx| {
+        let visit_count_str = ctx.cookie("visit_count") || "0";
+        let visit_count = try? visit_count_str.parse_int() || 0;
+        let new_count = visit_count + 1;
+
+        ctx.set_simple_cookie("visit_count", `${new_count}`);
+
+        ctx.json({
+            "message": `This is visit #${new_count}`,
+        });
+    });
+
+    // Start server
+    println("🍶 Sake server with Context API features");
+    println("Routes:");
+    println("  GET  /search?q=term&page=1");
+    println("  GET  /products?category=books&sort=price");
+    println("  POST /login (form: username, password)");
+    println("  POST /register (form: email, username, newsletter?)");
+    println("  GET  /profile (requires session cookie)");
+    println("  POST /logout");
+    println("  GET  /preferences");
+    println("  POST /preferences (form: theme, language)");
+    println("  GET  /visit (tracks visits with cookie)");
+    println("");
+    println("Try:");
+    println("  curl 'http://localhost:8080/search?q=navi&page=2'");
+    println("  curl 'http://localhost:8080/products?category=electronics'");
+    println("  curl -X POST -d 'username=admin&password=secret' http://localhost:8080/login -v");
+    println("  curl -b 'session_id=abc123xyz' http://localhost:8080/profile");
+    println("  curl http://localhost:8080/visit -v");
+
+    try app.run(":8080");
+}

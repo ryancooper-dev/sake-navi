@@ -51,15 +51,15 @@ Track implementation status of all Gin features in Sake.
 ### Request Data Access
 - ✅ `ctx.param(key)` - Path parameter
 - ✅ `ctx.query(key)` - Query parameter
-- 🔲 `ctx.get_query(key)` - Query with existence check
+- ✅ `ctx.get_query(key)` - Query with existence check
 - ✅ `ctx.header(key)` - Request header
 - ✅ `ctx.body()` - Request body
 - ✅ `ctx.method()` - HTTP method
 - ✅ `ctx.path()` - Request path
 - ✅ `ctx.uri()` - Full URI
 - ✅ `ctx.content_type()` - Content-Type header
-- 🔲 `ctx.post_form(key)` - Form data
-- 🔲 `ctx.get_post_form(key)` - Form with existence check
+- ✅ `ctx.post_form(key)` - Form data
+- ✅ `ctx.get_post_form(key)` - Form with existence check
 - 🔲 `ctx.form_file(key)` - Uploaded file
 - 🔲 `ctx.multipart_form()` - All form data
 - 🔲 `ctx.client_ip()` - Client IP address
@@ -96,9 +96,9 @@ Track implementation status of all Gin features in Sake.
 - 🔲 `ctx.append_header(key, value)` - Append header
 
 ### Cookies
-- 🔲 `ctx.set_cookie(name, value, ...)` - Set cookie
-- 🔲 `ctx.cookie(name)` - Get cookie
-- 🔲 Cookie options: MaxAge, Path, Domain, Secure, HttpOnly, SameSite
+- ✅ `ctx.set_cookie(name, value, ...)` - Set cookie
+- ✅ `ctx.cookie(name)` - Get cookie
+- ✅ Cookie options: MaxAge, Path, Domain, Secure, HttpOnly (SameSite not yet implemented)
 
 ### Middleware Control
 - ✅ `ctx.next()` - Execute next handler
@@ -271,11 +271,11 @@ Each feature MUST have:
 
 ### Phase 1: Essential Context Methods (Priority)
 - ✅ HEAD, OPTIONS, Any, Handle methods
-- 🔲 GetQuery with existence check
-- 🔲 Cookie support (SetCookie, Cookie)
+- ✅ GetQuery with existence check
+- ✅ Cookie support (SetCookie, Cookie)
 - 🔲 AbortWithStatusJSON
 - 🔲 File response method
-- 🔲 PostForm for form data
+- ✅ PostForm for form data
 
 ### Phase 2: Binding & Forms
 - 🔲 BindXML, BindYAML, BindForm
@@ -318,7 +318,7 @@ Each feature MUST have:
 
 ## Completion Metrics
 
-**Current Status:** ~42% complete (46/109 features)
+**Current Status:** ~47% complete (51/109 features)
 
 **Target:** 100% Gin parity by v2.0.0
 
