@@ -21,10 +21,10 @@
 /// }
 /// ```
 
-use std.net.{TcpListener, TcpConnection};
-use std.io.BufReader;
+use std.net.{TcpListener, Connection};
+use std.io.{BufReader, Bytes};
 use std.time;
-// Note: config, router, context, request, response, worker_pool are in same module
+// Note: config, router, context, request, response, worker_pool, worker_task, metrics are in same module
 
 /// Sake web framework engine
 pub struct Engine {
@@ -35,7 +35,7 @@ pub struct Engine {
     config: Config,
 
     /// Global middleware applied to all routes
-    middleware: [HandlerFunc],
+    middleware: [Handler],
 
     /// Shutdown channel
     shutdown_ch: channel<bool>?,
@@ -43,11 +43,18 @@ pub struct Engine {
     /// Worker pool for CPU-intensive routes
     worker_pool: SakeWorkerPool?,
 
+    /// Worker task channel for coordinating spawn + WorkerPool
+    /// Spawn sends tasks to main thread, which calls pool.map()
+    worker_task_ch: channel<WorkerTask>?,
+
     /// Connection counter channel (send +1 to increment, -1 to decrement)
     conn_counter_ch: channel<int>?,
 
     /// Connection query channel (send unit, receive current count)
     conn_query_ch: channel<int>?,
+
+    /// Performance metrics tracking
+    metrics: Metrics,
 }
 
 impl Engine {
@@ -65,8 +72,10 @@ impl Engine {
             middleware: [],
             shutdown_ch: nil,
             worker_pool: nil,
+            worker_task_ch: nil,
             conn_counter_ch: nil,
             conn_query_ch: nil,
+            metrics: Metrics.new(),
         };
     }
 
@@ -97,37 +106,37 @@ impl Engine {
     ///     ctx.json({"result": result});
     /// }).worker();
     /// ```
-    pub fn get(self, path: string, handler: HandlerFunc): RouteBuilder {
+    pub fn get(self, path: string, handler: Handler): RouteBuilder {
         return self.router.add_route("GET", path, handler);
     }
 
     /// Register a POST route
-    pub fn post(self, path: string, handler: HandlerFunc): RouteBuilder {
+    pub fn post(self, path: string, handler: Handler): RouteBuilder {
         return self.router.add_route("POST", path, handler);
     }
 
     /// Register a PUT route
-    pub fn put(self, path: string, handler: HandlerFunc): RouteBuilder {
+    pub fn put(self, path: string, handler: Handler): RouteBuilder {
         return self.router.add_route("PUT", path, handler);
     }
 
     /// Register a DELETE route
-    pub fn delete(self, path: string, handler: HandlerFunc): RouteBuilder {
+    pub fn delete(self, path: string, handler: Handler): RouteBuilder {
         return self.router.add_route("DELETE", path, handler);
     }
 
     /// Register a PATCH route
-    pub fn patch(self, path: string, handler: HandlerFunc): RouteBuilder {
+    pub fn patch(self, path: string, handler: Handler): RouteBuilder {
         return self.router.add_route("PATCH", path, handler);
     }
 
     /// Register an OPTIONS route
-    pub fn options(self, path: string, handler: HandlerFunc): RouteBuilder {
+    pub fn options(self, path: string, handler: Handler): RouteBuilder {
         return self.router.add_route("OPTIONS", path, handler);
     }
 
     /// Register a HEAD route
-    pub fn head(self, path: string, handler: HandlerFunc): RouteBuilder {
+    pub fn head(self, path: string, handler: Handler): RouteBuilder {
         return self.router.add_route("HEAD", path, handler);
     }
 
@@ -145,7 +154,7 @@ impl Engine {
     ///     ctx.json({"message": "pong"});
     /// });
     /// ```
-    pub fn any(self, path: string, handler: HandlerFunc) {
+    pub fn any(self, path: string, handler: Handler) {
         self.router.add_route("GET", path, handler);
         self.router.add_route("POST", path, handler);
         self.router.add_route("PUT", path, handler);
@@ -167,7 +176,7 @@ impl Engine {
     ///     try ctx.next();
     /// });
     /// ```
-    pub fn add_middleware(self, middleware: HandlerFunc) {
+    pub fn add_middleware(self, middleware: Handler) {
         self.middleware.push(middleware);
     }
 
@@ -227,37 +236,19 @@ impl Engine {
         let shutdown_ch = channel::<bool>();
         self.shutdown_ch = shutdown_ch;
 
-        // Initialize connection counter channels
-        let conn_counter_ch = channel::<int>();
-        let conn_query_ch = channel::<int>();
-        self.conn_counter_ch = conn_counter_ch;
-        self.conn_query_ch = conn_query_ch;
-
-        // Spawn connection counter task
-        spawn {
-            let count = 0;
-            while (true) {
-                // Try to receive counter update (+1 or -1)
-                let update_opt = try? conn_counter_ch.try_recv();
-                if (update_opt != nil) {
-                    count += update_opt!!;
-                }
-
-                // Try to receive query request
-                let query_opt = try? conn_query_ch.try_recv();
-                if (query_opt != nil) {
-                    try! conn_query_ch.send(count);
-                }
-            }
-        }
-
         // Initialize SakeWorkerPool if enabled
         if (self.config.enable_worker_pool) {
             let pool_size = self.config.effective_worker_pool_size();
             println(`Worker pool: enabled (${pool_size} threads)`);
             self.worker_pool = try SakeWorkerPool.new(pool_size);
+
+            // Initialize worker task channel for spawn-WorkerPool coordination
+            // This prevents deadlock: spawn sends tasks, main thread calls pool.map()
+            let worker_task_ch = channel::<WorkerTask>();
+            self.worker_task_ch = worker_task_ch;
+            println("Worker task channel: enabled (spawn-safe coordination)");
         } else {
-            println("Worker pool: disabled (spawn mode only)");
+            println("Worker pool: disabled");
         }
 
         // Start TCP listener
@@ -265,72 +256,186 @@ impl Engine {
         println("==================");
         println(`🍶 Server ready at ${addr}`);
 
-        // Accept connections loop
-        while (true) {
-            // Check for shutdown signal (non-blocking)
-            if (let ch = self.shutdown_ch) {
-                let should_stop = try? ch.try_recv();
-                if (should_stop != nil) {
-                    println("🍶 Sake server shutting down...");
-                    break;
-                }
-            }
+        // Architecture choice based on WorkerPool usage:
+        // - With WorkerPool: Channel-based coordination (Option B)
+        //   Accept in spawn, main thread processes WorkerPool tasks via channel
+        //   This prevents deadlock (spawn + pool.map() blocks permanently)
+        // - Without WorkerPool: Direct accept loop (Option A+)
+        //   Main thread accepts, each connection in spawn, no blocking calls
 
-            // Check max connections limit
-            if (let query_ch = self.conn_query_ch) {
-                if (let counter_ch = self.conn_counter_ch) {
-                    // Query current connection count
-                    try! query_ch.send(0);
-                    let current_count = try query_ch.recv();
-
-                    if (current_count >= self.config.max_connections) {
-                        // Connection limit reached - sleep briefly to avoid busy loop
-                        time.sleep(0.01.seconds());
-                        continue;
-                    }
-                }
-            }
-
-            // Accept next connection
-            let stream_result = try? listener.accept_tcp();
-            if (let stream = stream_result) {
-                // Increment active connections
-                if (let counter_ch = self.conn_counter_ch) {
-                    try! counter_ch.send(1);
-                }
-
-                // Handle connection (not using spawn for now to avoid variable capture issues)
-                // TODO: Re-enable spawn for concurrency once variable capture is resolved
-                defer {
-                    // Decrement active connections
-                    if (let counter_ch = self.conn_counter_ch) {
-                        try! counter_ch.send(-1);
-                    }
-                }
-
-                try? self.handle_connection(stream);
-            }
+        if (self.config.enable_worker_pool) {
+            // WorkerPool enabled: Use channel-based coordination
+            try self.run_with_worker_pool(listener);
+        } else {
+            // Spawn-only mode: Direct accept loop
+            try self.run_spawn_only(listener);
         }
 
         println("🍶 Sake server stopped");
+    }
+
+    /// Run server in spawn-only mode (no WorkerPool)
+    /// Main thread accepts connections, each handled in spawn
+    fn run_spawn_only(self, listener: TcpListener) throws {
+        loop {
+            // Check for shutdown signal (non-blocking)
+            if (let ch = self.shutdown_ch) {
+                if (let signal_opt = try? ch.try_recv()) {
+                    if (let _ = signal_opt) {
+                        println("🍶 Sake server shutting down...");
+                        break;
+                    }
+                }
+            }
+
+            // Accept connection (blocking)
+            let stream_result = try? listener.accept();
+
+            if (let stream = stream_result) {
+                // Handle each connection in spawn
+                spawn {
+                    let stream = stream;
+
+                    defer {
+                        try? stream.close();
+                    }
+
+                    // Read and handle request
+                    let raw_request_opt = try? self.read_http_request(stream);
+                    if (let raw_request = raw_request_opt) {
+                        if (raw_request.trim().len() == 0) {
+                            return;
+                        }
+
+                        let request_opt = try? self.parse_request_or_error(raw_request);
+                        if (let request = request_opt) {
+                            let route_match = self.router.find_match(request.method, request.path);
+
+                            if (let matched_route = route_match) {
+                                try? self.handle_spawn_execution(stream, request, matched_route);
+                            } else {
+                                let response = Response.not_found();
+                                let response_data = response.build();
+                                let bytes = response_data.bytes();
+                                try? stream.write_all(bytes);
+                                try? stream.flush();
+                            }
+                        }
+                    }
+                }
+            } else {
+                break;
+            }
+        }
+    }
+
+    /// Run server with WorkerPool using channel-based coordination
+    /// Accept loop in spawn, main thread processes WorkerPool tasks
+    fn run_with_worker_pool(self, listener: TcpListener) throws {
+        // Move accept to spawn so main thread can process WorkerPool tasks
+        spawn {
+            let listener = listener;
+            let worker_task_ch = self.worker_task_ch;
+
+            loop {
+                let stream_result = try? listener.accept();
+
+                if (let stream = stream_result) {
+                    // Handle connection directly in first-level spawn
+                    // (self is accessible here!)
+                    try? self.handle_connection_worker_mode(stream, worker_task_ch);
+                } else {
+                    break;
+                }
+            }
+        }
+
+        // Main loop: process WorkerPool tasks
+        while (true) {
+            if (let ch = self.shutdown_ch) {
+                if (let signal_opt = try? ch.try_recv()) {
+                    if (let _ = signal_opt) {
+                        println("🍶 Sake server shutting down...");
+                        break;
+                    }
+                }
+            }
+
+            if (let task_ch = self.worker_task_ch) {
+                let task_opt = try? task_ch.recv();
+
+                if (let task = task_opt) {
+                    if (let pool = self.worker_pool) {
+                        let response = try? pool.submit(task.ctx_json, task.handler_id);
+
+                        if (let resp = response) {
+                            try? task.response_ch.send(resp);
+                        }
+                    }
+                }
+            } else {
+                break;
+            }
+        }
+    }
+
+    /// Handle connection in WorkerPool mode (called from first-level spawn)
+    fn handle_connection_worker_mode(
+        self,
+        stream: Connection,
+        worker_task_ch: channel<WorkerTask>?
+    ) throws {
+        defer {
+            try? stream.close();
+        }
+
+        // Read and handle request
+        let raw_request_opt = try? self.read_http_request(stream);
+        if (let raw_request = raw_request_opt) {
+            if (raw_request.trim().len() == 0) {
+                return;
+            }
+
+            let request_opt = try? self.parse_request_or_error(raw_request);
+            if (let request = request_opt) {
+                let route_match = self.router.find_match(request.method, request.path);
+
+                if (let matched_route = route_match) {
+                    let use_worker = matched_route.route.worker_mode == WorkerMode.Worker;
+
+                    if (use_worker) {
+                        // WorkerPool route: use channel coordination
+                        try? self.handle_worker_with_channel(
+                            stream,
+                            request,
+                            matched_route,
+                            worker_task_ch
+                        );
+                    } else {
+                        // Spawn route: execute directly
+                        try? self.handle_spawn_execution(stream, request, matched_route);
+                    }
+                } else {
+                    let response = Response.not_found();
+                    let response_data = response.build();
+                    let bytes = response_data.bytes();
+                    try? stream.write_all(bytes);
+                    try? stream.flush();
+                }
+            }
+        }
     }
 
     /// Handle a single client connection
     ///
     /// # Arguments
     /// * `stream` - TCP stream for the connection
-    fn handle_connection(self, stream: TcpConnection) throws {
-        defer {
-            try? stream.close();
-        }
-
-        // Read request with timeout
-        // Note: Timeout enforcement requires async/await or thread-based timeouts.
-        // Current implementation (spawn) is single-threaded concurrent, making
-        // request-level timeouts challenging without blocking the entire runtime.
-        // Consider using TcpStream.set_read_timeout() if available in Navi stdlib.
-        // For now, request_timeout config is used for documentation only.
-
+    ///
+    /// # Architecture Note
+    /// This method is called directly from the accept loop (main thread).
+    /// - WorkerPool routes: Execute synchronously in main thread (can block)
+    /// - Spawn routes: Wrapped in spawn for concurrent execution
+    fn handle_connection(self, stream: Connection) throws {
         // Read raw HTTP request
         let reader = BufReader.new(stream);
         let raw_request = try reader.read_to_string();
@@ -353,16 +458,184 @@ impl Engine {
                             has_worker_pool;
 
             if (use_worker) {
-                // Execute in worker pool
+                // Execute in worker pool (synchronous, main thread)
+                // This will block the accept loop, but WorkerPool is for CPU-intensive
+                // tasks that complete quickly in parallel worker threads
+                defer {
+                    try? stream.close();
+                }
+
+                // Track metrics
+                let req_id = self.metrics.request_start();
+                defer {
+                    self.metrics.request_end(req_id);
+                }
+
                 try self.handle_worker_execution(stream, request, matched_route);
             } else {
-                // Execute with spawn (default)
-                try self.handle_spawn_execution(stream, request, matched_route);
+                // Execute with spawn (concurrent, non-blocking)
+                // Spawn allows the accept loop to continue processing new connections
+                spawn {
+                    // Capture variables for spawn context
+                    let stream = stream;
+                    let request = request;
+                    let matched_route = matched_route;
+                    let metrics = self.metrics;
+
+                    defer {
+                        try? stream.close();
+                    }
+
+                    // Track metrics
+                    let req_id = metrics.request_start();
+                    defer {
+                        metrics.request_end(req_id);
+                    }
+
+                    try? self.handle_spawn_execution(stream, request, matched_route);
+                }
             }
         } else {
             // No route found - send 404
+            defer {
+                try? stream.close();
+            }
+
             let response = Response.not_found();
             try response.send(stream);
+        }
+    }
+
+    /// Handle connection with channel-based WorkerPool coordination
+    ///
+    /// # Arguments
+    /// * `stream` - TCP stream for the connection
+    /// * `worker_task_ch` - Channel to send WorkerPool tasks to main thread
+    ///
+    /// # Architecture
+    /// This method runs in spawn and safely coordinates with WorkerPool:
+    /// 1. Read and parse request (in spawn)
+    /// 2. Match route
+    /// 3. If WorkerPool route:
+    ///    - Create response channel
+    ///    - Send task to main thread via worker_task_ch
+    ///    - Wait for response (channel.recv() yields in spawn)
+    /// 4. If Spawn route:
+    ///    - Execute directly in current spawn
+    fn handle_connection_with_channel(
+        self,
+        stream: Connection,
+        worker_task_ch: channel<WorkerTask>?
+    ) throws {
+        println("🟣 handle_connection_with_channel: ✅ ENTRY");
+        defer {
+            println("🟣 handle_connection_with_channel: 🔒 defer: closing stream");
+            try? stream.close();
+            println("🟣 handle_connection_with_channel: 🔒 defer: stream closed");
+        }
+
+        // Read raw HTTP request (correctly, not waiting for EOF)
+        println("🟣 Step 1: Reading HTTP request");
+        let raw_request = try self.read_http_request(stream);
+        println(`🟣 Step 2: ✅ Read ${raw_request.len()} bytes`);
+
+        // Parse HTTP request
+        println("🟣 Step 4: Parsing request");
+        let request = try self.parse_request_or_error(raw_request);
+        println(`🟣 Step 5: ✅ Parsed: ${request.method} ${request.path}`);
+
+        // Match route
+        println("🟣 Step 6: Matching route");
+        let route_match = self.router.find_match(request.method, request.path);
+        println("🟣 Step 7: ✅ Route match completed");
+
+        if (let matched_route = route_match) {
+            println("🟣 Step 8: ✅ Route matched!");
+
+            // Check if this route should use worker pool
+            let has_worker_pool = false;
+            if (let _ = self.worker_pool) {
+                has_worker_pool = true;
+                println("🟣 Step 9: WorkerPool available");
+            } else {
+                println("🟣 Step 9: No WorkerPool");
+            }
+
+            let use_worker = matched_route.route.worker_mode == WorkerMode.Worker &&
+                            self.config.enable_worker_pool &&
+                            has_worker_pool;
+
+            if (use_worker) {
+                println("🟢 Step 10: ✅ Using WorkerPool mode (via channel)");
+
+                // Serialize context for worker
+                println("🟢 Step 11: Creating context");
+                let ctx = Context.with_handlers(request, [], matched_route.params);
+                ctx.in_worker = true;
+                ctx.worker_size = self.config.effective_worker_pool_size();
+
+                println("🟢 Step 12: Serializing to JSON");
+                let worker_ctx = ctx.to_worker_context();
+                let ctx_json = try worker_ctx.to_json();
+                println(`🟢 Step 13: JSON serialized (${ctx_json.len()} bytes)`);
+
+                // Create response channel
+                println("🟢 Step 14: Creating response channel");
+                let response_ch = channel::<WorkerResponse>();
+
+                // Create worker task
+                println("🟢 Step 15: Creating WorkerTask");
+                let task = WorkerTask.new(ctx_json, 0, response_ch);
+
+                // Send task to main thread
+                if (let task_ch = worker_task_ch) {
+                    println("🟢 Step 16: Sending task to main thread via channel");
+                    try task_ch.send(task);
+                    println("🟢 Step 17: ✅ Task sent! Now waiting for response...");
+
+                    // Wait for response (recv() yields in spawn, allowing main thread to process)
+                    println("🟢 Step 18: Calling response_ch.recv() - WILL BLOCK");
+                    let worker_response = try response_ch.recv();
+                    println("🟢 Step 19: ✅ Received response from WorkerPool!");
+
+                    // Build and send HTTP response
+                    println("🟢 Step 20: Building HTTP response");
+                    let response = Response.new();
+                    response.status(worker_response.status);
+
+                    for (let name, value in worker_response.headers) {
+                        response.header(name, value);
+                    }
+
+                    response.write(worker_response.body);
+
+                    println("🟢 Step 21: Sending HTTP response to client");
+                    let response_data = response.build();
+                    println(`🟢 Step 21a: Response built, ${response_data.len()} bytes`);
+
+                    // Use bytes write_all to workaround stdlib write_string bug
+                    println("🟢 Step 21b: Converting to bytes");
+                    let bytes = response_data.bytes();
+                    println(`🟢 Step 21c: Got ${bytes.len()} bytes, writing...`);
+                    try stream.write_all(bytes);
+                    println("🟢 Step 21d: Flushing stream");
+                    try stream.flush();
+                    println("🟢 Step 22: ✅ Response sent!");
+                } else {
+                    println("🔴 ERROR: Worker task channel not initialized!");
+                    throw "Worker task channel not initialized";
+                }
+            } else {
+                // Spawn route: execute directly
+                println("🟡 Step 10: Using spawn execution (not WorkerPool)");
+                try self.handle_spawn_execution(stream, request, matched_route);
+                println("🟡 Step 11: ✅ Spawn execution completed");
+            }
+        } else {
+            println("🟣 Step 8: ❌ No route matched - sending 404");
+            let response = Response.not_found();
+            try response.send(stream);
+            println("🟣 Step 9: 404 sent");
         }
     }
 
@@ -380,12 +653,18 @@ impl Engine {
     /// * `route_match` - Matched route with parameters
     fn handle_spawn_execution(
         self,
-        stream: TcpConnection,
+        stream: Connection,
         request: Request,
         route_match: RouteMatch
     ) throws {
+        // Track metrics
+        let req_id = self.metrics.request_start();
+        defer {
+            self.metrics.request_end(req_id);
+        }
+
         // Build handler chain: global middleware + route middleware + handler
-        let handlers: [HandlerFunc] = [];
+        let handlers: [Handler] = [];
 
         // 1. Add global middleware
         for (let mw in self.middleware) {
@@ -406,8 +685,11 @@ impl Engine {
         // Execute handler chain
         try ctx.next();
 
-        // Send response
-        try ctx.response.send(stream);
+        // Send response using bytes workaround for stdlib bug
+        let response_data = ctx.response.build();
+        let bytes = response_data.bytes();
+        try stream.write_all(bytes);
+        try stream.flush();
     }
 
     /// Handle request execution in worker pool mode (parallel, multi-threaded)
@@ -418,7 +700,7 @@ impl Engine {
     /// * `route_match` - Matched route with parameters
     fn handle_worker_execution(
         self,
-        stream: TcpConnection,
+        stream: Connection,
         request: Request,
         route_match: RouteMatch
     ) throws {
@@ -449,6 +731,112 @@ impl Engine {
         } else {
             throw "Worker pool not initialized";
         }
+    }
+
+    /// Handle WorkerPool execution using channel-based coordination
+    ///
+    /// This method runs in spawn and coordinates with main thread via channel:
+    /// 1. Serialize context to JSON
+    /// 2. Create response channel
+    /// 3. Send task to main thread via worker_task_ch
+    /// 4. Wait for response (channel.recv() yields, doesn't block)
+    /// 5. Send HTTP response to client
+    ///
+    /// # Arguments
+    /// * `stream` - TCP stream
+    /// * `request` - Parsed HTTP request
+    /// * `route_match` - Matched route with parameters
+    /// * `worker_task_ch` - Channel to send tasks to main thread
+    fn handle_worker_with_channel(
+        self,
+        stream: Connection,
+        request: Request,
+        route_match: RouteMatch,
+        worker_task_ch: channel<WorkerTask>?
+    ) throws {
+        // Track metrics
+        let req_id = self.metrics.request_start();
+        defer {
+            self.metrics.request_end(req_id);
+        }
+
+        // Serialize context for worker
+        let ctx = Context.with_handlers(request, [], route_match.params);
+        ctx.in_worker = true;
+        ctx.worker_size = self.config.effective_worker_pool_size();
+
+        let worker_ctx = ctx.to_worker_context();
+        let ctx_json = try worker_ctx.to_json();
+
+        // Create response channel
+        let response_ch = channel::<WorkerResponse>();
+
+        // Create and send task to main thread
+        if (let task_ch = worker_task_ch) {
+            let task = WorkerTask.new(ctx_json, 0, response_ch);
+            try task_ch.send(task);
+
+            // Wait for response (recv() yields in spawn, allowing other tasks to run)
+            let worker_response = try response_ch.recv();
+
+            // Build and send HTTP response
+            let response = Response.new();
+            response.status(worker_response.status);
+
+            for (let name, value in worker_response.headers) {
+                response.header(name, value);
+            }
+
+            response.write(worker_response.body);
+
+            // Send using bytes workaround
+            let response_data = response.build();
+            let bytes = response_data.bytes();
+            try stream.write_all(bytes);
+            try stream.flush();
+        } else {
+            throw "Worker task channel not initialized";
+        }
+    }
+
+    /// Read HTTP request from connection stream
+    ///
+    /// Reads until \r\n\r\n (end of headers), then reads body if Content-Length present.
+    /// Does NOT wait for EOF like read_to_string().
+    ///
+    /// # Arguments
+    /// * `stream` - Connection stream
+    ///
+    /// # Returns
+    /// Complete HTTP request string
+    fn read_http_request(self, stream: Connection): string throws {
+        let reader = BufReader.new(stream);
+        let lines: [string] = [];
+        let headers_complete = false;
+
+        // Read headers line by line until empty line
+        while (!headers_complete) {
+            let line_opt = try? reader.read_line();
+            if (let line = line_opt) {
+                // Check for end of headers (empty line or \r\n)
+                let trimmed = line.trim();
+                if (trimmed.len() == 0) {
+                    headers_complete = true;
+                    lines.push("");  // Keep the empty line
+                } else {
+                    lines.push(line);
+                }
+            } else {
+                headers_complete = true;
+                break;
+            }
+        }
+
+        // TODO: Handle request body for POST/PUT
+        // For now, we only support GET requests (no body)
+
+        let result = lines.join("\r\n");
+        return result;
     }
 
     /// Parse request or return error response
@@ -501,12 +889,44 @@ test "create engine with custom config" {
     assert_eq app.config.worker_pool_size, 4;
 }
 
-// TODO: Re-enable test once Navi supports closure type inference
-// test "register GET route" { ... }
+test "register GET route" {
+    let app = Engine.with_defaults();
+    app.get("/", func_handler(|ctx| {
+        ctx.string("Hello");
+    }));
+    assert_eq app.router.routes.len(), 1;
+}
 
-// TODO: Re-enable tests once Navi supports closure type inference in route handlers
-// test "register multiple routes" { ... }
-// test "add middleware" { ... }
-// test "register OPTIONS route" { ... }
-// test "register HEAD route" { ... }
-// test "register ANY route" { ... }
+test "register multiple routes" {
+    let app = Engine.with_defaults();
+    app.get("/", func_handler(|ctx| { ctx.string("Home"); }));
+    app.post("/users", func_handler(|ctx| { ctx.string("Create"); }));
+    app.put("/users/:id", func_handler(|ctx| { ctx.string("Update"); }));
+    assert_eq app.router.routes.len(), 3;
+}
+
+test "add middleware" {
+    let app = Engine.with_defaults();
+    app.add_middleware(func_handler(|ctx| {
+        try ctx.next();
+    }));
+    assert_eq app.middleware.len(), 1;
+}
+
+test "register OPTIONS route" {
+    let app = Engine.with_defaults();
+    app.options("/", func_handler(|ctx| { ctx.string("OPTIONS"); }));
+    assert_eq app.router.routes.len(), 1;
+}
+
+test "register HEAD route" {
+    let app = Engine.with_defaults();
+    app.head("/", func_handler(|ctx| { ctx.string("HEAD"); }));
+    assert_eq app.router.routes.len(), 1;
+}
+
+test "register ANY route" {
+    let app = Engine.with_defaults();
+    app.any("/", func_handler(|ctx| { ctx.string("ANY"); }));
+    assert_eq app.router.routes.len(), 7;  // GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD
+}

@@ -1,0 +1,39 @@
+/// Worker task coordination for channel-based WorkerPool integration
+///
+/// This module provides the infrastructure to safely use WorkerPool from spawn
+/// by coordinating through channels, avoiding the spawn+Worker.pool deadlock.
+
+/// A WorkerPool task request sent from spawn to main thread
+pub struct WorkerTask {
+    /// Serialized WorkerContext as JSON
+    pub ctx_json: string,
+
+    /// Handler identifier (for future use)
+    pub handler_id: int,
+
+    /// Channel to send the response back to the requesting spawn
+    pub response_ch: channel<WorkerResponse>,
+}
+
+impl WorkerTask {
+    /// Create a new WorkerTask
+    ///
+    /// # Arguments
+    /// * `ctx_json` - Serialized request context
+    /// * `handler_id` - Handler identifier
+    /// * `response_ch` - Channel for response
+    ///
+    /// # Returns
+    /// New WorkerTask instance
+    pub fn new(
+        ctx_json: string,
+        handler_id: int,
+        response_ch: channel<WorkerResponse>
+    ): WorkerTask {
+        return WorkerTask {
+            ctx_json,
+            handler_id,
+            response_ch,
+        };
+    }
+}
