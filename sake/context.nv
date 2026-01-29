@@ -161,7 +161,121 @@ impl Context {
     pub fn content_type(self): string? {
         return self.request.content_type();
     }
-    
+
+    /// Get cookie value by name
+    ///
+    /// Parses the Cookie header and returns the value for the specified cookie.
+    ///
+    /// # Arguments
+    /// * `name` - Cookie name
+    ///
+    /// # Returns
+    /// Cookie value or nil if not found
+    ///
+    /// # Example
+    /// ```nv
+    /// // Request: Cookie: session_id=abc123; user_pref=dark
+    /// let session = ctx.cookie("session_id");  // "abc123"
+    /// let pref = ctx.cookie("user_pref");  // "dark"
+    /// ```
+    pub fn cookie(self, name: string): string? {
+        let cookie_header = self.header("cookie") || "";
+        if (cookie_header.len() == 0) {
+            return nil;
+        }
+
+        // Parse cookies: "name1=value1; name2=value2"
+        let pairs = cookie_header.split(";");
+        for (let pair in pairs) {
+            let trimmed = pair.trim();
+            let eq_idx = trimmed.find("=");
+            if (let idx = eq_idx) {
+                let key = trimmed.slice(0, idx).trim();
+                let value = trimmed.slice(idx + 1, trimmed.len()).trim();
+                if (key == name) {
+                    return value;
+                }
+            }
+        }
+
+        return nil;
+    }
+
+    /// Set a cookie in the response
+    ///
+    /// Sets a Set-Cookie header with the specified name and value.
+    /// For simplicity, this basic version only supports name and value.
+    /// For advanced options (expires, path, domain, secure, httponly),
+    /// use set_cookie_advanced().
+    ///
+    /// # Arguments
+    /// * `name` - Cookie name
+    /// * `value` - Cookie value
+    ///
+    /// # Example
+    /// ```nv
+    /// ctx.set_cookie("session_id", "abc123");
+    /// ctx.set_cookie("theme", "dark");
+    /// ```
+    pub fn set_cookie(self, name: string, value: string) {
+        let cookie_value = `${name}=${value}`;
+        self.response.header("Set-Cookie", cookie_value);
+    }
+
+    /// Set a cookie with advanced options
+    ///
+    /// # Arguments
+    /// * `name` - Cookie name
+    /// * `value` - Cookie value
+    /// * `max_age` - Max age in seconds (nil for session cookie)
+    /// * `path` - Cookie path (nil for "/")
+    /// * `domain` - Cookie domain (nil for current domain)
+    /// * `secure` - Whether cookie requires HTTPS
+    /// * `http_only` - Whether cookie is HTTP only (not accessible via JavaScript)
+    ///
+    /// # Example
+    /// ```nv
+    /// ctx.set_cookie_advanced("session_id", "abc123", 3600, "/", nil, true, true);
+    /// ```
+    pub fn set_cookie_advanced(
+        self,
+        name: string,
+        value: string,
+        max_age: int?,
+        path: string?,
+        domain: string?,
+        secure: bool,
+        http_only: bool
+    ) {
+        let cookie_value = `${name}=${value}`;
+
+        // Add Max-Age
+        if (let age = max_age) {
+            cookie_value = `${cookie_value}; Max-Age=${age}`;
+        }
+
+        // Add Path
+        let cookie_path = path || "/";
+        cookie_value = `${cookie_value}; Path=${cookie_path}`;
+
+        // Add Domain
+        if (let dom = domain) {
+            cookie_value = `${cookie_value}; Domain=${dom}`;
+        }
+
+        // Add Secure flag
+        if (secure) {
+            cookie_value = `${cookie_value}; Secure`;
+        }
+
+        // Add HttpOnly flag
+        if (http_only) {
+            cookie_value = `${cookie_value}; HttpOnly`;
+        }
+
+        self.response.header("Set-Cookie", cookie_value);
+    }
+
     // ============================================
     // Request body parsing
     // ============================================
@@ -875,4 +989,62 @@ test "bind_header returns all headers" {
     assert_eq headers.get("host"), "localhost";
     assert_eq headers.get("user-agent"), "TestClient";
     assert_eq headers.get("authorization"), "Bearer token123";
+}
+
+test "parse cookies from request" {
+    let req = try! Request.parse("GET / HTTP/1.1\r\nHost: localhost\r\nCookie: session_id=abc123; theme=dark; lang=en\r\n\r\n");
+    let ctx = Context.new(req, Response.new());
+
+    assert_eq ctx.cookie("session_id"), "abc123";
+    assert_eq ctx.cookie("theme"), "dark";
+    assert_eq ctx.cookie("lang"), "en";
+    assert_eq ctx.cookie("missing"), nil;
+}
+
+test "parse cookies with spaces" {
+    let req = try! Request.parse("GET / HTTP/1.1\r\nHost: localhost\r\nCookie: name1=value1;  name2=value2  ; name3=value3\r\n\r\n");
+    let ctx = Context.new(req, Response.new());
+
+    assert_eq ctx.cookie("name1"), "value1";
+    assert_eq ctx.cookie("name2"), "value2";
+    assert_eq ctx.cookie("name3"), "value3";
+}
+
+test "set_cookie adds Set-Cookie header" {
+    let req = try! Request.parse("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n");
+    let ctx = Context.new(req, Response.new());
+
+    ctx.set_cookie("session_id", "abc123");
+
+    assert_eq ctx.response.get_header("Set-Cookie"), "session_id=abc123";
+}
+
+test "set_cookie_advanced with all options" {
+    let req = try! Request.parse("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n");
+    let ctx = Context.new(req, Response.new());
+
+    ctx.set_cookie_advanced("session_id", "abc123", 3600, "/app", "example.com", true, true);
+
+    let cookie_header = ctx.response.get_header("Set-Cookie") || "";
+    assert cookie_header.contains("session_id=abc123");
+    assert cookie_header.contains("Max-Age=3600");
+    assert cookie_header.contains("Path=/app");
+    assert cookie_header.contains("Domain=example.com");
+    assert cookie_header.contains("Secure");
+    assert cookie_header.contains("HttpOnly");
+}
+
+test "set_cookie_advanced with nil options" {
+    let req = try! Request.parse("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n");
+    let ctx = Context.new(req, Response.new());
+
+    ctx.set_cookie_advanced("token", "xyz789", nil, nil, nil, false, false);
+
+    let cookie_header = ctx.response.get_header("Set-Cookie") || "";
+    assert cookie_header.contains("token=xyz789");
+    assert cookie_header.contains("Path=/");
+    assert !cookie_header.contains("Max-Age");
+    assert !cookie_header.contains("Domain");
+    assert !cookie_header.contains("Secure");
+    assert !cookie_header.contains("HttpOnly");
 }
