@@ -150,6 +150,26 @@ impl Engine {
         return self.router.patch(pattern, handler);
     }
 
+    /// Register HEAD route
+    pub fn head(self, pattern: string, handler: HandlerFunc): Route {
+        return self.router.head(pattern, handler);
+    }
+
+    /// Register OPTIONS route
+    pub fn options(self, pattern: string, handler: HandlerFunc): Route {
+        return self.router.options(pattern, handler);
+    }
+
+    /// Register route for any HTTP method
+    pub fn any(self, pattern: string, handler: HandlerFunc) {
+        self.router.any(pattern, handler);
+    }
+
+    /// Register route with custom HTTP method
+    pub fn handle(self, method: string, pattern: string, handler: HandlerFunc): Route {
+        return self.router.handle(method, pattern, handler);
+    }
+
     /// Add global middleware
     pub fn use(self, middleware: HandlerFunc) {
         self.router.use(middleware);

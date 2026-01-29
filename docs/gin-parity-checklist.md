@@ -19,10 +19,10 @@ Track implementation status of all Gin features in Sake.
 - ✅ PUT - `app.put(pattern, handler)`
 - ✅ DELETE - `app.delete(pattern, handler)`
 - ✅ PATCH - `app.patch(pattern, handler)`
-- 🔲 HEAD - `app.head(pattern, handler)`
-- 🔲 OPTIONS - `app.options(pattern, handler)`
-- 🔲 Any - `app.any(pattern, handler)` (all methods)
-- 🔲 Handle - `app.handle(method, pattern, handler)` (custom method)
+- ✅ HEAD - `app.head(pattern, handler)`
+- ✅ OPTIONS - `app.options(pattern, handler)`
+- ✅ Any - `app.any(pattern, handler)` (all methods)
+- ✅ Handle - `app.handle(method, pattern, handler)` (custom method)
 
 ### Route Patterns
 - ✅ Exact paths - `/users`
