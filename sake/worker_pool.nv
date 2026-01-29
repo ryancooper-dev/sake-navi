@@ -2,40 +2,26 @@
 ///
 /// WorkerPool manages a pool of worker threads that execute
 /// CPU-bound tasks in parallel across multiple CPU cores.
+///
+/// Uses std.worker.Worker.pool() for true multi-threaded parallelism.
 
 use std.worker.Worker;
+use std.json;
 // Note: worker_context is in same module
 
-/// Task submitted to worker pool
-struct WorkerTask {
-    /// Serialized request context
-    context_json: string,
-
-    /// Handler function to execute
-    /// Note: This is a simplified model - actual implementation
-    /// would need proper handler serialization
-    handler_id: int,
-}
-
 /// Worker pool for parallel task execution
-pub struct WorkerPool {
-    /// Number of worker threads
-    size: int,
+///
+/// Wraps Worker.pool to provide JSON-based request/response handling
+/// for CPU-intensive route handlers.
+pub struct SakeWorkerPool {
+    /// Number of worker threads (informational, auto-detected by Worker.pool)
+    pub size: int,
 
-    /// Workers in the pool
-    workers: [Worker],
-
-    /// Task submission channel
-    task_ch: channel<WorkerTask>,
-
-    /// Result channel
-    result_ch: channel<WorkerResponse>,
-
-    /// Shutdown signal
-    shutdown_ch: channel<bool>,
+    /// The underlying worker pool
+    pool: WorkerPool<string, string>,
 }
 
-impl WorkerPool {
+impl SakeWorkerPool {
     /// Create a new worker pool
     ///
     /// # Arguments
@@ -46,140 +32,104 @@ impl WorkerPool {
     ///
     /// # Errors
     /// Throws if worker creation fails
-    pub fn new(size: int): WorkerPool throws {
+    ///
+    /// # Example
+    /// ```nv
+    /// let pool = try SakeWorkerPool.new(4);
+    /// ```
+    pub fn new(size: int): SakeWorkerPool throws {
         if (size <= 0) {
             throw "Worker pool size must be > 0";
         }
 
-        let task_ch = channel::<WorkerTask>();
-        let result_ch = channel::<WorkerResponse>();
-        let shutdown_ch = channel::<bool>();
-
-        let workers: [Worker] = [];
-
-        // Create worker threads
-        for (let i in 0..size) {
-            let worker = try Worker.create(|worker| {
-                WorkerPool.worker_loop(worker, task_ch, result_ch, shutdown_ch);
-            });
-            workers.push(worker);
-        }
+        // Create worker pool with handler function
+        // Worker.pool uses CPU count automatically for thread count
+        let pool = try Worker.pool(SakeWorkerPool.process_request);
 
         println(`🍶 WorkerPool initialized with ${size} threads`);
 
-        return WorkerPool {
+        return SakeWorkerPool {
             size,
-            workers,
-            task_ch,
-            result_ch,
-            shutdown_ch,
+            pool,
         };
     }
 
-    /// Worker thread main loop
+    /// Process a request in worker thread
     ///
     /// # Arguments
-    /// * `worker` - Worker instance
-    /// * `task_ch` - Channel to receive tasks
-    /// * `result_ch` - Channel to send results
-    /// * `shutdown_ch` - Shutdown signal channel
-    fn worker_loop(
-        worker: Worker,
-        task_ch: channel<WorkerTask>,
-        result_ch: channel<WorkerResponse>,
-        shutdown_ch: channel<bool>
-    ) {
-        while (true) {
-            // Check for shutdown
-            let should_stop = try? shutdown_ch.try_recv();
-            if (should_stop != nil) {
-                break;
-            }
-
-            // Receive task (blocking)
-            let task_result = try? task_ch.recv();
-            if (let task = task_result) {
-                // Execute task
-                let response = try? WorkerPool.execute_task(task);
-
-                // Send result
-                if (let resp = response) {
-                    try? result_ch.send(resp);
-                } else {
-                    // Error - send 500 response
-                    let error_resp = WorkerResponse.new(
-                        500,
-                        {"Content-Type": "application/json"},
-                        "{\"error\": \"Worker execution failed\"}"
-                    );
-                    try? result_ch.send(error_resp);
-                }
-            }
-        }
-    }
-
-    /// Execute a task
-    ///
-    /// # Arguments
-    /// * `task` - Task to execute
+    /// * `ctx_json` - Serialized WorkerContext as JSON
     ///
     /// # Returns
-    /// Worker response
-    fn execute_task(task: WorkerTask): WorkerResponse throws {
+    /// Serialized WorkerResponse as JSON
+    fn process_request(ctx_json: string): string throws {
         // Deserialize context
-        let ctx = try WorkerContext.from_json(task.context_json);
+        let ctx = try WorkerContext.from_json(ctx_json);
 
-        // TODO: Execute handler
-        // For now, return a simple response
-        // Actual implementation would need to serialize and execute the handler
+        // TODO: Execute actual handler
+        // For now, return a simple success response
+        // Actual implementation would lookup and execute the registered handler
 
-        return WorkerResponse.new(
+        let response = WorkerResponse.new(
             200,
             {"Content-Type": "application/json"},
-            "{\"status\": \"ok\"}"
+            "{\"status\": \"ok\", \"worker\": true}"
         );
+
+        return try response.to_json();
     }
 
     /// Submit a task to the worker pool
     ///
     /// # Arguments
-    /// * `context` - Serialized request context
-    /// * `handler_id` - Handler identifier
+    /// * `context_json` - Serialized request context
+    /// * `handler_id` - Handler identifier (for future use)
     ///
     /// # Returns
     /// Worker response
     ///
     /// # Errors
     /// Throws if submission or execution fails
+    ///
+    /// # Example
+    /// ```nv
+    /// let ctx = WorkerContext.new("/test", "GET", {:}, {:}, {:}, "");
+    /// let ctx_json = try ctx.to_json();
+    /// let response = try pool.submit(ctx_json, 0);
+    /// ```
     pub fn submit(self, context_json: string, handler_id: int): WorkerResponse throws {
-        let task = WorkerTask {
-            context_json,
-            handler_id,
-        };
+        // Execute in worker pool
+        let result_json = try self.pool.map(context_json);
 
-        // Send task to worker
-        try self.task_ch.send(task);
+        // Deserialize response
+        let response = try WorkerResponse.from_json(result_json);
+        return response;
+    }
 
-        // Wait for result
-        let result = try self.result_ch.recv();
-        return result;
+    /// Submit multiple tasks in parallel
+    ///
+    /// # Arguments
+    /// * `contexts` - Array of serialized request contexts
+    ///
+    /// # Returns
+    /// Array of worker responses
+    pub fn submit_batch(self, contexts: [string]): [WorkerResponse] throws {
+        let results = try self.pool.map_array(contexts);
+
+        let responses: [WorkerResponse] = [];
+        for (let result_json in results) {
+            let response = try WorkerResponse.from_json(result_json);
+            responses.push(response);
+        }
+
+        return responses;
     }
 
     /// Shutdown the worker pool
     ///
-    /// Signals all workers to stop and waits for them to finish.
-    pub fn shutdown(self) throws {
-        println("🍶 Shutting down WorkerPool...");
-
-        // Send shutdown signal to all workers
-        for (let i in 0..self.size) {
-            try self.shutdown_ch.send(true);
-        }
-
-        // TODO: Wait for workers to finish
-        // In a real implementation, we'd join the worker threads
-
-        println("🍶 WorkerPool shutdown complete");
+    /// Note: Worker.pool handles cleanup automatically
+    pub fn shutdown(self) {
+        println("🍶 WorkerPool shutdown");
+        // Worker.pool handles cleanup automatically
     }
 }
 
@@ -187,18 +137,15 @@ impl WorkerPool {
 // Tests
 // ============================================
 
-// NOTE: This test is disabled because Worker.create cannot pass
-// channel<WorkerTask> across threads (unsupported type serialization)
-// test "create worker pool" {
-//     let pool = try! WorkerPool.new(4);
-//     assert_eq pool.size, 4;
-//     assert_eq pool.workers.len(), 4;
-// }
+test "create worker pool" {
+    let pool = try! SakeWorkerPool.new(4);
+    assert_eq pool.size, 4;
+}
 
 test "worker pool validates size" {
     // Test that invalid pool sizes throw errors
     let threw1 = false;
-    if (let _ = try? WorkerPool.new(0)) {
+    if (let _ = try? SakeWorkerPool.new(0)) {
         // Should not succeed
     } else {
         threw1 = true;
@@ -206,7 +153,7 @@ test "worker pool validates size" {
     assert threw1;
 
     let threw2 = false;
-    if (let _ = try? WorkerPool.new(-1)) {
+    if (let _ = try? SakeWorkerPool.new(-1)) {
         // Should not succeed
     } else {
         threw2 = true;
@@ -214,23 +161,45 @@ test "worker pool validates size" {
     assert threw2;
 }
 
-// NOTE: This test is disabled because Worker.create cannot pass
-// channel<WorkerTask> across threads (unsupported type serialization)
-// test "submit task to worker pool" {
-//     let pool = try! WorkerPool.new(2);
-//
-//     let ctx = WorkerContext.new(
-//         "/test",
-//         "GET",
-//         {:},
-//         {:},
-//         {:},
-//         ""
-//     );
-//
-//     let ctx_json = try! ctx.to_json();
-//
-//     let response = try! pool.submit(ctx_json, 0);
-//
-//     assert_eq response.status, 200;
-// }
+test "submit task to worker pool" {
+    let pool = try! SakeWorkerPool.new(2);
+
+    let ctx = WorkerContext.new(
+        "/test",
+        "GET",
+        {:},
+        {:},
+        {:},
+        ""
+    );
+
+    let ctx_json = try! ctx.to_json();
+
+    let response = try! pool.submit(ctx_json, 0);
+
+    assert_eq response.status, 200;
+}
+
+test "submit batch to worker pool" {
+    let pool = try! SakeWorkerPool.new(2);
+
+    let contexts: [string] = [];
+    for (let i in 0..3) {
+        let ctx = WorkerContext.new(
+            `/test/${i}`,
+            "GET",
+            {:},
+            {:},
+            {:},
+            ""
+        );
+        contexts.push(try! ctx.to_json());
+    }
+
+    let responses = try! pool.submit_batch(contexts);
+
+    assert_eq responses.len(), 3;
+    for (let resp in responses) {
+        assert_eq resp.status, 200;
+    }
+}

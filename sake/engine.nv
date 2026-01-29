@@ -2,7 +2,7 @@
 ///
 /// Engine is the core of the Sake framework. It manages the HTTP server,
 /// routing, middleware, and request handling with support for both
-/// concurrent (spawn) and parallel (WorkerPool) execution.
+/// concurrent (spawn) and parallel (SakeWorkerPool) execution.
 ///
 /// # Example
 /// ```nv
@@ -41,7 +41,7 @@ pub struct Engine {
     shutdown_ch: channel<bool>?,
 
     /// Worker pool for CPU-intensive routes
-    worker_pool: WorkerPool?,
+    worker_pool: SakeWorkerPool?,
 
     /// Connection counter channel (send +1 to increment, -1 to decrement)
     conn_counter_ch: channel<int>?,
@@ -251,11 +251,11 @@ impl Engine {
             }
         }
 
-        // Initialize WorkerPool if enabled
+        // Initialize SakeWorkerPool if enabled
         if (self.config.enable_worker_pool) {
             let pool_size = self.config.effective_worker_pool_size();
             println(`Worker pool: enabled (${pool_size} threads)`);
-            self.worker_pool = try WorkerPool.new(pool_size);
+            self.worker_pool = try SakeWorkerPool.new(pool_size);
         } else {
             println("Worker pool: disabled (spawn mode only)");
         }
@@ -480,7 +480,7 @@ impl Engine {
 
         // Shutdown worker pool if initialized
         if (let pool = self.worker_pool) {
-            try pool.shutdown();
+            pool.shutdown();
         }
     }
 }
