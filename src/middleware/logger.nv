@@ -1,0 +1,115 @@
+/// Logger Middleware
+///
+/// Logs HTTP requests and responses with timing information.
+///
+/// # Example
+/// ```nv
+/// use sake.middleware.logger;
+///
+/// app.use(logger());
+/// ```
+
+use std.time;
+use context.{Context, HandlerFunc};
+
+/// Create logger middleware
+///
+/// Logs each request with method, path, status code, and duration.
+///
+/// # Example
+/// ```nv
+/// app.use(logger());
+/// // Output: [2024-01-28 10:30:45] GET /users/123 -> 200 OK (12ms)
+/// ```
+pub fn logger(): HandlerFunc {
+    return |ctx: Context| {
+        let start = time.Instant.now();
+        let method = ctx.method();
+        let path = ctx.path();
+
+        println(`[${format_time()}] ${method} ${path}`);
+
+        // Execute handler chain
+        try ctx.next();
+
+        let duration = start.elapsed();
+        let status = ctx.response.status_code;
+        let status_text = get_status_text(status);
+
+        println(`   -> ${status} ${status_text} (${duration.as_millis()}ms)`);
+    };
+}
+
+/// Create colored logger middleware
+///
+/// Logs with colored output based on status code.
+pub fn logger_colored(): HandlerFunc {
+    return |ctx: Context| {
+        let start = time.Instant.now();
+        let method = ctx.method();
+        let path = ctx.path();
+
+        // Execute handler chain
+        try ctx.next();
+
+        let duration = start.elapsed();
+        let status = ctx.response.status_code;
+
+        // Color based on status
+        let color = if (status >= 500) {
+            "\x1b[31m"  // Red
+        } else if (status >= 400) {
+            "\x1b[33m"  // Yellow
+        } else if (status >= 300) {
+            "\x1b[36m"  // Cyan
+        } else {
+            "\x1b[32m"  // Green
+        };
+
+        let reset = "\x1b[0m";
+
+        println(`${color}[${format_time()}] ${method} ${path} -> ${status} (${duration.as_millis()}ms)${reset}`);
+    };
+}
+
+/// Format current time
+fn format_time(): string {
+    let now = time.now();
+    // Simplified time format
+    return now.to_string();
+}
+
+/// Get status text for HTTP status code
+fn get_status_text(code: int): string {
+    if (code >= 200 && code < 300) {
+        return "OK";
+    } else if (code >= 300 && code < 400) {
+        return "Redirect";
+    } else if (code >= 400 && code < 500) {
+        return "Client Error";
+    } else if (code >= 500) {
+        return "Server Error";
+    }
+    return "Unknown";
+}
+
+// ============================================
+// Tests
+// ============================================
+
+test "logger middleware" {
+    use request.Request;
+
+    let req = try! Request.parse("GET /test HTTP/1.1\r\nHost: localhost\r\n\r\n");
+
+    let test_handler = |ctx: Context| {
+        ctx.status(200).string("OK");
+    };
+
+    let handlers = [logger(), test_handler];
+    let ctx = Context.with_handlers(req, handlers, {:});
+
+    try! ctx.next();
+
+    assert_eq ctx.response.status_code, 200;
+}

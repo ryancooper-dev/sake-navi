@@ -1,0 +1,112 @@
+/// Recovery Middleware
+///
+/// Catches panics and errors in handlers to prevent server crashes.
+/// Returns 500 Internal Server Error on unhandled errors.
+///
+/// # Example
+/// ```nv
+/// use sake.middleware.recovery;
+///
+/// app.use(recovery());
+/// ```
+
+use context.{Context, HandlerFunc};
+
+/// Create recovery middleware
+///
+/// This middleware catches errors in downstream handlers and
+/// returns a 500 error response instead of crashing the server.
+///
+/// # Example
+/// ```nv
+/// app.use(recovery());
+///
+/// app.get("/error", |ctx| {
+///     throw "Something went wrong";
+/// });
+/// // Returns 500 with error message instead of crashing
+/// ```
+pub fn recovery(): HandlerFunc {
+    return |ctx: Context| {
+        // Execute handler chain with error catching
+        do {
+            try ctx.next();
+        } catch (e) {
+            let error_msg = e.error();
+            eprintln(`[Recovery] Caught error: ${error_msg}`);
+
+            // Only send error response if not already sent
+            if (!ctx.response.is_sent()) {
+                ctx.abort_with_error(500, "Internal Server Error");
+            }
+        }
+    };
+}
+
+/// Create recovery middleware with custom error handler
+///
+/// # Arguments
+/// * `error_handler` - Custom function to handle errors
+///
+/// # Example
+/// ```nv
+/// app.use(recovery_with_handler(|ctx, err| {
+///     log_error(err);
+///     ctx.status(500).json({"error": "Oops!"});
+/// }));
+/// ```
+pub fn recovery_with_handler(error_handler: |(ctx: Context, error: string)|): HandlerFunc {
+    return |ctx: Context| {
+        do {
+            try ctx.next();
+        } catch (e) {
+            let error_msg = e.error();
+            error_handler(ctx, error_msg);
+
+            if (!ctx.response.is_sent()) {
+                ctx.abort();
+            }
+        }
+    };
+}
+
+// ============================================
+// Tests
+// ============================================
+
+test "recovery catches errors" {
+    use request.Request;
+    use response.Response;
+
+    let req = try! Request.parse("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n");
+
+    let failing_handler = |ctx: Context| {
+        throw "Test error";
+    };
+
+    let handlers = [recovery(), failing_handler];
+    let ctx = Context.with_handlers(req, handlers, {:});
+
+    // Should not panic
+    try! ctx.next();
+
+    // Should return 500
+    assert_eq ctx.response.status_code, 500;
+}
+
+test "recovery allows success" {
+    use request.Request;
+
+    let req = try! Request.parse("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n");
+
+    let success_handler = |ctx: Context| {
+        ctx.status(200).string("OK");
+    };
+
+    let handlers = [recovery(), success_handler];
+    let ctx = Context.with_handlers(req, handlers, {:});
+
+    try! ctx.next();
+
+    assert_eq ctx.response.status_code, 200;
+}

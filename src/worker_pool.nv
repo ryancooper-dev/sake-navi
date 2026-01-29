@@ -22,6 +22,19 @@
 
 use std.worker.Worker;
 use std.vm;
+use std.time;
+
+/// Load balancing strategy
+pub enum LoadBalanceStrategy {
+    /// Round-robin distribution
+    RoundRobin,
+
+    /// Least loaded worker (tracks active tasks)
+    LeastLoaded,
+
+    /// Random worker selection
+    Random,
+}
 
 /// WorkerPool configuration (serializable, can be stored as struct field)
 pub struct WorkerPoolConfig {
@@ -30,6 +43,12 @@ pub struct WorkerPoolConfig {
 
     /// Maximum queue size for pending tasks
     queue_size: int,
+
+    /// Task timeout in seconds (0 = no timeout)
+    timeout_secs: int,
+
+    /// Load balancing strategy
+    load_balance: LoadBalanceStrategy,
 }
 
 impl WorkerPoolConfig {
@@ -52,6 +71,8 @@ impl WorkerPoolConfig {
         return WorkerPoolConfig {
             size: actual_size,
             queue_size: 1000,
+            timeout_secs: 30,
+            load_balance: LoadBalanceStrategy.RoundRobin,
         };
     }
 
@@ -64,6 +85,30 @@ impl WorkerPoolConfig {
     /// Self for chaining
     pub fn with_queue_size(self, size: int): WorkerPoolConfig {
         self.queue_size = size;
+        return self;
+    }
+
+    /// Set task timeout
+    ///
+    /// # Arguments
+    /// * `seconds` - Timeout in seconds (0 = no timeout)
+    ///
+    /// # Returns
+    /// Self for chaining
+    pub fn with_timeout(self, seconds: int): WorkerPoolConfig {
+        self.timeout_secs = seconds;
+        return self;
+    }
+
+    /// Set load balancing strategy
+    ///
+    /// # Arguments
+    /// * `strategy` - Load balancing strategy
+    ///
+    /// # Returns
+    /// Self for chaining
+    pub fn with_load_balance(self, strategy: LoadBalanceStrategy): WorkerPoolConfig {
+        self.load_balance = strategy;
         return self;
     }
 
@@ -142,14 +187,34 @@ impl WorkerPoolConfig {
             }
         }
 
+        // Initialize worker states
+        let worker_states: [WorkerState] = [];
+        for (let worker in workers) {
+            worker_states.push(WorkerState {
+                worker,
+                active_tasks: 0,
+            });
+        }
+
         return WorkerPoolRuntime {
             config: self,
             tasks,
             responses,
             workers,
+            worker_states,
             shutdown_flag: false,
+            current_worker_index: 0,
         };
     }
+}
+
+/// Worker state for load balancing
+struct WorkerState {
+    /// Worker instance
+    worker: Worker,
+
+    /// Number of active tasks
+    active_tasks: int,
 }
 
 /// WorkerPool runtime (contains channels, must be in local scope)
@@ -170,8 +235,14 @@ pub struct WorkerPoolRuntime {
     /// Worker threads
     workers: [Worker],
 
+    /// Worker states for load balancing
+    worker_states: [WorkerState],
+
     /// Shutdown flag
     shutdown_flag: bool,
+
+    /// Current worker index (for round-robin)
+    current_worker_index: int,
 }
 
 impl WorkerPoolRuntime {
@@ -204,6 +275,103 @@ impl WorkerPoolRuntime {
     /// ```
     pub fn get_result(self): string throws {
         return try self.responses.recv();
+    }
+
+    /// Get result with timeout
+    ///
+    /// # Arguments
+    /// * `timeout_secs` - Timeout in seconds
+    ///
+    /// # Returns
+    /// Result data or nil on timeout
+    pub fn get_result_timeout(self, timeout_secs: int): string? throws {
+        if (timeout_secs <= 0) {
+            return try self.get_result();
+        }
+
+        // Spawn timeout task
+        let timeout_ch = channel::<bool>();
+        spawn {
+            time.sleep(timeout_secs.seconds());
+            try! timeout_ch.send(true);
+        }
+
+        // Race between result and timeout
+        spawn {
+            let result = try? self.responses.recv();
+            if (result != nil) {
+                // Signal that we got result first
+                try! timeout_ch.send(false);
+            }
+        }
+
+        let timed_out = try timeout_ch.recv();
+        if (timed_out) {
+            return nil;  // Timeout
+        }
+
+        return try self.responses.recv();
+    }
+
+    /// Select next worker based on load balancing strategy
+    fn select_worker(self): int {
+        let strategy = self.config.load_balance;
+
+        switch (strategy.(type)) {
+            case LoadBalanceStrategy.RoundRobin:
+                return self.select_round_robin();
+
+            case LoadBalanceStrategy.LeastLoaded:
+                return self.select_least_loaded();
+
+            case LoadBalanceStrategy.Random:
+                return self.select_random();
+
+            default:
+                return self.select_round_robin();
+        }
+    }
+
+    /// Round-robin worker selection
+    fn select_round_robin(self): int {
+        let index = self.current_worker_index;
+        self.current_worker_index = (self.current_worker_index + 1) % self.workers.len();
+        return index;
+    }
+
+    /// Select least loaded worker
+    fn select_least_loaded(self): int {
+        let min_index = 0;
+        let min_tasks = self.worker_states[0].active_tasks;
+
+        for (let i in 1..self.worker_states.len()) {
+            let tasks = self.worker_states[i].active_tasks;
+            if (tasks < min_tasks) {
+                min_tasks = tasks;
+                min_index = i;
+            }
+        }
+
+        return min_index;
+    }
+
+    /// Random worker selection
+    fn select_random(self): int {
+        // Simple pseudo-random (in real implementation, use std.rand)
+        let now = time.now().as_secs();
+        return (now as int) % self.workers.len();
+    }
+
+    /// Increment worker task count
+    fn increment_worker_tasks(self, worker_index: int) {
+        self.worker_states[worker_index].active_tasks += 1;
+    }
+
+    /// Decrement worker task count
+    fn decrement_worker_tasks(self, worker_index: int) {
+        if (self.worker_states[worker_index].active_tasks > 0) {
+            self.worker_states[worker_index].active_tasks -= 1;
+        }
     }
 
     /// Get the number of workers in the pool
