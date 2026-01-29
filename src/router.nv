@@ -126,6 +126,56 @@ impl Router {
         return self.add("PATCH", pattern, handler);
     }
 
+    /// Add HEAD route
+    pub fn head(self, pattern: string, handler: HandlerFunc): Route {
+        return self.add("HEAD", pattern, handler);
+    }
+
+    /// Add OPTIONS route
+    pub fn options(self, pattern: string, handler: HandlerFunc): Route {
+        return self.add("OPTIONS", pattern, handler);
+    }
+
+    /// Add route for any HTTP method
+    ///
+    /// # Arguments
+    /// * `pattern` - Path pattern
+    /// * `handler` - Handler function
+    ///
+    /// # Returns
+    /// Array of created routes for all methods
+    ///
+    /// # Example
+    /// ```nv
+    /// router.any("/resource", |ctx| {
+    ///     ctx.json({"message": "Any method accepted"});
+    /// });
+    /// ```
+    pub fn any(self, pattern: string, handler: HandlerFunc) {
+        let methods = ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"];
+        for (let method in methods) {
+            self.add(method, pattern, handler);
+        }
+    }
+
+    /// Add route with custom HTTP method
+    ///
+    /// # Arguments
+    /// * `method` - HTTP method (can be non-standard like "PROPFIND")
+    /// * `pattern` - Path pattern
+    /// * `handler` - Handler function
+    ///
+    /// # Returns
+    /// The created Route
+    ///
+    /// # Example
+    /// ```nv
+    /// router.handle("PROPFIND", "/webdav", propfind_handler);
+    /// ```
+    pub fn handle(self, method: string, pattern: string, handler: HandlerFunc): Route {
+        return self.add(method, pattern, handler);
+    }
+
     /// Add global middleware
     ///
     /// # Arguments
@@ -384,4 +434,57 @@ test "method matching" {
 
     let put_match = router.match("PUT", "/resource");
     assert_eq put_match, nil;
+}
+
+test "head and options routes" {
+    let router = Router.new();
+
+    router.head("/resource", |ctx| { ctx.status(200); });
+    router.options("/resource", |ctx| { ctx.string("OPTIONS"); });
+
+    let head_match = router.match("HEAD", "/resource");
+    assert head_match != nil;
+    assert_eq head_match!.route.method, "HEAD";
+
+    let options_match = router.match("OPTIONS", "/resource");
+    assert options_match != nil;
+    assert_eq options_match!.route.method, "OPTIONS";
+}
+
+test "any method route" {
+    let router = Router.new();
+
+    router.any("/resource", |ctx| { ctx.string("any"); });
+
+    // Should match all standard methods
+    let get_match = router.match("GET", "/resource");
+    assert get_match != nil;
+
+    let post_match = router.match("POST", "/resource");
+    assert post_match != nil;
+
+    let put_match = router.match("PUT", "/resource");
+    assert put_match != nil;
+
+    let delete_match = router.match("DELETE", "/resource");
+    assert delete_match != nil;
+
+    let patch_match = router.match("PATCH", "/resource");
+    assert patch_match != nil;
+
+    let head_match = router.match("HEAD", "/resource");
+    assert head_match != nil;
+
+    let options_match = router.match("OPTIONS", "/resource");
+    assert options_match != nil;
+}
+
+test "custom method with handle" {
+    let router = Router.new();
+
+    router.handle("PROPFIND", "/webdav", |ctx| { ctx.string("webdav"); });
+
+    let match_result = router.match("PROPFIND", "/webdav");
+    assert match_result != nil;
+    assert_eq match_result!.route.method, "PROPFIND";
 }
