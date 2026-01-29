@@ -1,0 +1,122 @@
+/// Router Groups Example
+///
+/// Demonstrates organizing routes with groups, prefixes, and group-level middleware.
+
+use sake.Engine;
+use sake.Context;
+
+fn main() throws {
+    let app = Engine.new();
+
+    // Public routes (no authentication)
+    app.get("/", |ctx| {
+        ctx.string("Welcome to Sake! 🍶");
+    });
+
+    app.get("/about", |ctx| {
+        ctx.json({"app": "Sake", "version": "1.0.0"});
+    });
+
+    // API v1 group
+    let api_v1 = app.group("/api/v1");
+
+    // Add logger middleware to API group
+    api_v1.use(|ctx: Context| {
+        println(`[API v1] ${ctx.method()} ${ctx.path()}`);
+        try ctx.next();
+    });
+
+    api_v1.get("/users", |ctx| {
+        ctx.json({
+            "users": [
+                {"id": 1, "name": "Alice"},
+                {"id": 2, "name": "Bob"},
+            ]
+        });
+    });
+
+    api_v1.get("/users/:id", |ctx| {
+        let id = ctx.param("id") || "0";
+        ctx.json({
+            "id": id,
+            "name": "User ${id}",
+        });
+    });
+
+    api_v1.post("/users", |ctx| {
+        ctx.status(201);
+        ctx.json({"message": "User created"});
+    });
+
+    // Admin group (nested under /api/v1)
+    let admin = api_v1.group("/admin");
+
+    // Add authentication middleware to admin group
+    admin.use(|ctx: Context| {
+        let auth_header = ctx.header("Authorization");
+        if (auth_header == nil || auth_header == "") {
+            ctx.abort_with_status(401);
+            ctx.json({"error": "Unauthorized"});
+            return;
+        }
+        try ctx.next();
+    });
+
+    admin.get("/dashboard", |ctx| {
+        ctx.json({"message": "Admin dashboard"});
+    });
+
+    admin.get("/users", |ctx| {
+        ctx.json({
+            "message": "Admin user management",
+            "total_users": 100,
+        });
+    });
+
+    admin.delete("/users/:id", |ctx| {
+        let id = ctx.param("id") || "0";
+        ctx.json({
+            "message": "User deleted",
+            "id": id,
+        });
+    });
+
+    // API v2 group (parallel to v1)
+    let api_v2 = app.group("/api/v2");
+
+    api_v2.use(|ctx: Context| {
+        println(`[API v2] ${ctx.method()} ${ctx.path()}`);
+        try ctx.next();
+    });
+
+    api_v2.get("/users", |ctx| {
+        ctx.json({
+            "users": [
+                {"id": 1, "name": "Alice", "email": "alice@example.com"},
+                {"id": 2, "name": "Bob", "email": "bob@example.com"},
+            ],
+            "version": "v2"
+        });
+    });
+
+    // Start server
+    println("🍶 Sake server with router groups");
+    println("Routes:");
+    println("  GET  /");
+    println("  GET  /about");
+    println("  GET  /api/v1/users");
+    println("  GET  /api/v1/users/:id");
+    println("  POST /api/v1/users");
+    println("  GET  /api/v1/admin/dashboard (requires auth)");
+    println("  GET  /api/v1/admin/users (requires auth)");
+    println("  DEL  /api/v1/admin/users/:id (requires auth)");
+    println("  GET  /api/v2/users");
+    println("");
+    println("Try:");
+    println("  curl http://localhost:8080/api/v1/users");
+    println("  curl http://localhost:8080/api/v2/users");
+    println("  curl http://localhost:8080/api/v1/admin/dashboard");
+    println("  curl -H 'Authorization: Bearer token' http://localhost:8080/api/v1/admin/dashboard");
+
+    try app.run(":8080");
+}

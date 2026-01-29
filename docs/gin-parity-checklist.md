@@ -32,10 +32,10 @@ Track implementation status of all Gin features in Sake.
 - 🔲 Regex constraints - `/users/:id([0-9]+)`
 
 ### Router Groups
-- 🔲 Group creation - `app.group("/api")`
-- 🔲 Group middleware - `group.use(middleware)`
-- 🔲 Nested groups - `group.group("/v1")`
-- 🔲 Group prefix inheritance
+- ✅ Group creation - `app.group("/api")`
+- ✅ Group middleware - `group.use(middleware)`
+- ✅ Nested groups - `group.group("/v1")`
+- ✅ Group prefix inheritance
 
 ### Static Files
 - 🔲 Static directory - `app.static("/assets", "./public")`
@@ -141,7 +141,7 @@ Track implementation status of all Gin features in Sake.
 - ✅ Custom middleware support
 - ✅ Global middleware - `app.use(middleware)`
 - ✅ Route-specific middleware - `route.use(middleware)`
-- 🔲 Group middleware - `group.use(middleware)`
+- ✅ Group middleware - `group.use(middleware)`
 
 ---
 
@@ -270,7 +270,7 @@ Each feature MUST have:
 ## Implementation Progress
 
 ### Phase 1: Essential Context Methods (Priority)
-- 🔲 HEAD, OPTIONS, Any, Handle methods
+- ✅ HEAD, OPTIONS, Any, Handle methods
 - 🔲 GetQuery with existence check
 - 🔲 Cookie support (SetCookie, Cookie)
 - 🔲 AbortWithStatusJSON
@@ -286,8 +286,8 @@ Each feature MUST have:
 - 🔲 Validation framework
 
 ### Phase 3: Router Groups & Static Files
-- 🔲 Router groups with prefix
-- 🔲 Group middleware
+- ✅ Router groups with prefix
+- ✅ Group middleware
 - 🔲 Static file serving
 - 🔲 StaticFS, StaticFile
 - 🔲 File caching headers
@@ -318,7 +318,7 @@ Each feature MUST have:
 
 ## Completion Metrics
 
-**Current Status:** ~35% complete (38/109 features)
+**Current Status:** ~42% complete (46/109 features)
 
 **Target:** 100% Gin parity by v2.0.0
 

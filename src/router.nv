@@ -71,6 +71,18 @@ pub struct Router {
     middleware: [HandlerFunc],
 }
 
+/// Router Group for organizing routes with common prefix and middleware
+pub struct RouterGroup {
+    /// Path prefix for this group
+    prefix: string,
+
+    /// Reference to the parent router
+    router: Router,
+
+    /// Middleware specific to this group
+    middleware: [HandlerFunc],
+}
+
 impl Router {
     /// Create a new Router
     pub fn new(): Router {
@@ -320,6 +332,154 @@ impl Router {
 
         return handlers;
     }
+
+    /// Create a new router group with the given prefix
+    ///
+    /// # Arguments
+    /// * `prefix` - URL path prefix (e.g., "/api", "/v1")
+    ///
+    /// # Returns
+    /// RouterGroup for method chaining
+    ///
+    /// # Example
+    /// ```nv
+    /// let api = router.group("/api");
+    /// api.get("/users", handler);  // Matches /api/users
+    /// ```
+    pub fn group(self, prefix: string): RouterGroup {
+        return RouterGroup {
+            prefix,
+            router: self,
+            middleware: [],
+        };
+    }
+}
+
+impl RouterGroup {
+    /// Combine group prefix with pattern
+    fn full_path(self, pattern: string): string {
+        // Handle edge cases
+        if (self.prefix == "" || self.prefix == "/") {
+            return pattern;
+        }
+
+        // Remove trailing slash from prefix
+        let prefix = self.prefix;
+        if (prefix.ends_with("/")) {
+            prefix = prefix.substring(0, prefix.len() - 1);
+        }
+
+        // Ensure pattern starts with /
+        let path = pattern;
+        if (!path.starts_with("/")) {
+            path = "/" + path;
+        }
+
+        return prefix + path;
+    }
+
+    /// Add route with group middleware
+    fn add_route(self, method: string, pattern: string, handler: HandlerFunc): Route {
+        let full_pattern = self.full_path(pattern);
+        let route = self.router.add(method, full_pattern, handler);
+
+        // Add group middleware to the route
+        for (let mw in self.middleware) {
+            route.middleware.push(mw);
+        }
+
+        return route;
+    }
+
+    /// Add GET route to this group
+    pub fn get(self, pattern: string, handler: HandlerFunc): Route {
+        return self.add_route("GET", pattern, handler);
+    }
+
+    /// Add POST route to this group
+    pub fn post(self, pattern: string, handler: HandlerFunc): Route {
+        return self.add_route("POST", pattern, handler);
+    }
+
+    /// Add PUT route to this group
+    pub fn put(self, pattern: string, handler: HandlerFunc): Route {
+        return self.add_route("PUT", pattern, handler);
+    }
+
+    /// Add DELETE route to this group
+    pub fn delete(self, pattern: string, handler: HandlerFunc): Route {
+        return self.add_route("DELETE", pattern, handler);
+    }
+
+    /// Add PATCH route to this group
+    pub fn patch(self, pattern: string, handler: HandlerFunc): Route {
+        return self.add_route("PATCH", pattern, handler);
+    }
+
+    /// Add HEAD route to this group
+    pub fn head(self, pattern: string, handler: HandlerFunc): Route {
+        return self.add_route("HEAD", pattern, handler);
+    }
+
+    /// Add OPTIONS route to this group
+    pub fn options(self, pattern: string, handler: HandlerFunc): Route {
+        return self.add_route("OPTIONS", pattern, handler);
+    }
+
+    /// Add route for any HTTP method to this group
+    pub fn any(self, pattern: string, handler: HandlerFunc) {
+        let methods = ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"];
+        for (let method in methods) {
+            self.add_route(method, pattern, handler);
+        }
+    }
+
+    /// Add route with custom HTTP method to this group
+    pub fn handle(self, method: string, pattern: string, handler: HandlerFunc): Route {
+        return self.add_route(method, pattern, handler);
+    }
+
+    /// Add middleware to this group
+    ///
+    /// # Arguments
+    /// * `middleware` - Middleware handler
+    ///
+    /// # Returns
+    /// Self for chaining
+    ///
+    /// # Example
+    /// ```nv
+    /// let api = router.group("/api");
+    /// api.use(auth_middleware);
+    /// api.get("/users", handler);
+    /// ```
+    pub fn use(self, middleware: HandlerFunc): RouterGroup {
+        self.middleware.push(middleware);
+        return self;
+    }
+
+    /// Create a nested group with combined prefix
+    ///
+    /// # Arguments
+    /// * `prefix` - Additional prefix for nested group
+    ///
+    /// # Returns
+    /// New RouterGroup with combined prefix
+    ///
+    /// # Example
+    /// ```nv
+    /// let api = router.group("/api");
+    /// let v1 = api.group("/v1");  // Full prefix: /api/v1
+    /// v1.get("/users", handler);   // Matches /api/v1/users
+    /// ```
+    pub fn group(self, prefix: string): RouterGroup {
+        let combined_prefix = self.full_path(prefix);
+        return RouterGroup {
+            prefix: combined_prefix,
+            router: self.router,
+            middleware: self.middleware.clone(),  // Inherit parent middleware
+        };
+    }
 }
 
 // ============================================
@@ -487,4 +647,116 @@ test "custom method with handle" {
     let match_result = router.match("PROPFIND", "/webdav");
     assert match_result != nil;
     assert_eq match_result!.route.method, "PROPFIND";
+}
+
+test "router group basic" {
+    let router = Router.new();
+    let api = router.group("/api");
+
+    api.get("/users", |ctx| { ctx.string("users"); });
+
+    let match_result = router.match("GET", "/api/users");
+    assert match_result != nil;
+    assert_eq match_result!.route.pattern, "/api/users";
+}
+
+test "router group with multiple routes" {
+    let router = Router.new();
+    let api = router.group("/api");
+
+    api.get("/users", |ctx| { ctx.string("get users"); });
+    api.post("/users", |ctx| { ctx.string("create user"); });
+    api.put("/users/:id", |ctx| { ctx.string("update user"); });
+
+    let get_match = router.match("GET", "/api/users");
+    assert get_match != nil;
+
+    let post_match = router.match("POST", "/api/users");
+    assert post_match != nil;
+
+    let put_match = router.match("PUT", "/api/users/123");
+    assert put_match != nil;
+    assert_eq put_match!.params.get("id"), "123";
+}
+
+test "nested router groups" {
+    let router = Router.new();
+    let api = router.group("/api");
+    let v1 = api.group("/v1");
+
+    v1.get("/users", |ctx| { ctx.string("v1 users"); });
+
+    let match_result = router.match("GET", "/api/v1/users");
+    assert match_result != nil;
+    assert_eq match_result!.route.pattern, "/api/v1/users";
+}
+
+test "router group middleware" {
+    let router = Router.new();
+
+    let auth_middleware = |ctx: Context| {
+        ctx.set("auth", true);
+        try ctx.next();
+    };
+
+    let api = router.group("/api");
+    api.use(auth_middleware);
+    api.get("/users", |ctx| { ctx.string("users"); });
+
+    let match_result = router.match("GET", "/api/users");
+    assert match_result != nil;
+    assert_eq match_result!.route.middleware.len(), 1;
+}
+
+test "nested groups inherit middleware" {
+    let router = Router.new();
+
+    let logger = |ctx: Context| {
+        println("log");
+        try ctx.next();
+    };
+
+    let auth = |ctx: Context| {
+        println("auth");
+        try ctx.next();
+    };
+
+    let api = router.group("/api");
+    api.use(logger);
+
+    let v1 = api.group("/v1");
+    v1.use(auth);
+    v1.get("/users", |ctx| { ctx.string("users"); });
+
+    let match_result = router.match("GET", "/api/v1/users");
+    assert match_result != nil;
+    // Should have both logger and auth middleware
+    assert_eq match_result!.route.middleware.len(), 2;
+}
+
+test "router group with any method" {
+    let router = Router.new();
+    let api = router.group("/api");
+
+    api.any("/resource", |ctx| { ctx.string("any method"); });
+
+    let get_match = router.match("GET", "/api/resource");
+    assert get_match != nil;
+
+    let post_match = router.match("POST", "/api/resource");
+    assert post_match != nil;
+
+    let delete_match = router.match("DELETE", "/api/resource");
+    assert delete_match != nil;
+}
+
+test "router group handles trailing slashes" {
+    let router = Router.new();
+    let api = router.group("/api/");  // Trailing slash in prefix
+
+    api.get("/users", |ctx| { ctx.string("users"); });
+
+    let match_result = router.match("GET", "/api/users");
+    assert match_result != nil;
+    assert_eq match_result!.route.pattern, "/api/users";
 }

@@ -30,7 +30,7 @@ use std.io;
 use context.{Context, HandlerFunc};
 use request.Request;
 use response.Response;
-use router.{Router, RouteMatch};
+use router.{Router, RouterGroup, RouteMatch};
 use worker_pool.{WorkerPoolConfig, WorkerPoolRuntime};
 
 /// Sake Engine configuration
@@ -173,6 +173,24 @@ impl Engine {
     /// Add global middleware
     pub fn use(self, middleware: HandlerFunc) {
         self.router.use(middleware);
+    }
+
+    /// Create a router group with the given prefix
+    ///
+    /// # Arguments
+    /// * `prefix` - URL path prefix (e.g., "/api", "/v1")
+    ///
+    /// # Returns
+    /// RouterGroup for method chaining
+    ///
+    /// # Example
+    /// ```nv
+    /// let app = Engine.new();
+    /// let api = app.group("/api");
+    /// api.get("/users", handler);  // Matches /api/users
+    /// ```
+    pub fn group(self, prefix: string): RouterGroup {
+        return self.router.group(prefix);
     }
 
     // ============================================
@@ -437,4 +455,50 @@ test "serialize request" {
     assert json.contains(`"method": "GET"`);
     assert json.contains(`"path": "/test"`);
     assert json.contains(`"id": "123"`);
+}
+
+test "engine router groups" {
+    let app = Engine.new();
+    let api = app.group("/api");
+
+    api.get("/users", |ctx| {
+        ctx.string("users");
+    });
+
+    let match_result = app.router.match("GET", "/api/users");
+    assert match_result != nil;
+    assert_eq match_result!.route.pattern, "/api/users";
+}
+
+test "engine nested groups" {
+    let app = Engine.new();
+    let api = app.group("/api");
+    let v1 = api.group("/v1");
+
+    v1.get("/users", |ctx| {
+        ctx.string("v1 users");
+    });
+
+    let match_result = app.router.match("GET", "/api/v1/users");
+    assert match_result != nil;
+    assert_eq match_result!.route.pattern, "/api/v1/users";
+}
+
+test "engine group with middleware" {
+    let app = Engine.new();
+
+    let auth = |ctx: Context| {
+        ctx.set("authenticated", true);
+        try ctx.next();
+    };
+
+    let api = app.group("/api");
+    api.use(auth);
+    api.get("/protected", |ctx| {
+        ctx.string("protected resource");
+    });
+
+    let match_result = app.router.match("GET", "/api/protected");
+    assert match_result != nil;
+    assert_eq match_result!.route.middleware.len(), 1;
 }
