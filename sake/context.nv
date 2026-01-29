@@ -167,17 +167,17 @@ impl Context {
     // ============================================
     
     /// Parse request body as JSON into type T
-    /// 
+    ///
     /// # Returns
     /// Parsed value or throws on parse error
-    /// 
+    ///
     /// # Example
     /// ```nv
     /// struct CreateUser {
     ///     name: string,
     ///     email: string,
     /// }
-    /// 
+    ///
     /// let json_str = try ctx.bind_json();
     /// ```
     ///
@@ -190,7 +190,99 @@ impl Context {
         // Return raw JSON string for now
         return body;
     }
-    
+
+    /// Parse query string parameters into a map
+    ///
+    /// Returns all query parameters as a string-to-string map.
+    /// Unlike query() which gets a single parameter, this returns all parameters.
+    ///
+    /// # Returns
+    /// Map of query parameters
+    ///
+    /// # Example
+    /// ```nv
+    /// // URL: /search?q=navi&limit=10&page=2
+    /// let params = ctx.bind_query();
+    /// let query = params.get("q") || "";  // "navi"
+    /// let limit = params.get("limit") || "20";  // "10"
+    /// ```
+    pub fn bind_query(self): <string, string> {
+        return self.request.query_params;
+    }
+
+    /// Parse form data from request body
+    ///
+    /// Parses application/x-www-form-urlencoded form data into a map.
+    /// Similar to bind_query() but parses the request body instead of URL.
+    ///
+    /// # Returns
+    /// Map of form fields or throws on parse error
+    ///
+    /// # Errors
+    /// Throws if Content-Type is not application/x-www-form-urlencoded
+    ///
+    /// # Example
+    /// ```nv
+    /// // POST /login
+    /// // Content-Type: application/x-www-form-urlencoded
+    /// // Body: username=alice&password=secret
+    /// let form = try ctx.bind_form();
+    /// let username = form.get("username") || "";
+    /// ```
+    pub fn bind_form(self): <string, string> throws {
+        // Check content type
+        let content_type = self.content_type() || "";
+        if (!content_type.contains("application/x-www-form-urlencoded")) {
+            throw `Expected application/x-www-form-urlencoded, got ${content_type}`;
+        }
+
+        let body = self.request.body;
+        if (body.len() == 0) {
+            return {:};
+        }
+
+        // Parse form data using same logic as query string
+        return Request.parse_query_string(body);
+    }
+
+    /// Get URI path parameters as a map
+    ///
+    /// Returns all path parameters extracted from the route pattern.
+    /// This is similar to param() but returns all parameters at once.
+    ///
+    /// # Returns
+    /// Map of path parameters
+    ///
+    /// # Example
+    /// ```nv
+    /// // Route: /users/:id/posts/:post_id
+    /// // URL: /users/123/posts/456
+    /// let params = ctx.bind_uri();
+    /// let user_id = params.get("id") || "";  // "123"
+    /// let post_id = params.get("post_id") || "";  // "456"
+    /// ```
+    pub fn bind_uri(self): <string, string> {
+        return self.params;
+    }
+
+    /// Get all request headers as a map
+    ///
+    /// Returns all HTTP headers from the request.
+    /// Header names are normalized to lowercase.
+    ///
+    /// # Returns
+    /// Map of headers (lowercase keys)
+    ///
+    /// # Example
+    /// ```nv
+    /// let headers = ctx.bind_header();
+    /// let auth = headers.get("authorization") || "";
+    /// let user_agent = headers.get("user-agent") || "";
+    /// ```
+    pub fn bind_header(self): <string, string> {
+        return self.request.headers;
+    }
+
     // ============================================
     // Response helpers
     // ============================================
@@ -727,4 +819,60 @@ test "convert context to worker context" {
     assert_eq worker_ctx.params.get("id"), "123";
     assert_eq worker_ctx.query.get("page"), "1";
     assert_eq worker_ctx.body, "body";
+}
+
+test "bind_query returns all query parameters" {
+    let req = try! Request.parse("GET /search?q=navi&limit=10&page=2 HTTP/1.1\r\nHost: localhost\r\n\r\n");
+    let ctx = Context.new(req, Response.new());
+
+    let params = ctx.bind_query();
+    assert_eq params.get("q"), "navi";
+    assert_eq params.get("limit"), "10";
+    assert_eq params.get("page"), "2";
+    assert_eq params.get("missing"), nil;
+}
+
+test "bind_form parses urlencoded form data" {
+    let req = try! Request.parse("POST /login HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/x-www-form-urlencoded\r\n\r\nusername=alice&password=secret123");
+    let ctx = Context.new(req, Response.new());
+
+    let form = try! ctx.bind_form();
+    assert_eq form.get("username"), "alice";
+    assert_eq form.get("password"), "secret123";
+}
+
+test "bind_form throws on wrong content type" {
+    let req = try! Request.parse("POST /login HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\n\r\n{}");
+    let ctx = Context.new(req, Response.new());
+
+    let result = try? ctx.bind_form();
+    assert_eq result, nil;
+}
+
+test "bind_form returns empty map for empty body" {
+    let req = try! Request.parse("POST /login HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/x-www-form-urlencoded\r\n\r\n");
+    let ctx = Context.new(req, Response.new());
+
+    let form = try! ctx.bind_form();
+    assert_eq form.len(), 0;
+}
+
+test "bind_uri returns path parameters" {
+    let req = try! Request.parse("GET /users/123/posts/456 HTTP/1.1\r\nHost: localhost\r\n\r\n");
+    let params: <string, string> = {"id": "123", "post_id": "456"};
+    let ctx = Context.with_handlers(req, [], params);
+
+    let uri_params = ctx.bind_uri();
+    assert_eq uri_params.get("id"), "123";
+    assert_eq uri_params.get("post_id"), "456";
+}
+
+test "bind_header returns all headers" {
+    let req = try! Request.parse("GET / HTTP/1.1\r\nHost: localhost\r\nUser-Agent: TestClient\r\nAuthorization: Bearer token123\r\n\r\n");
+    let ctx = Context.new(req, Response.new());
+
+    let headers = ctx.bind_header();
+    assert_eq headers.get("host"), "localhost";
+    assert_eq headers.get("user-agent"), "TestClient";
+    assert_eq headers.get("authorization"), "Bearer token123";
 }
