@@ -433,7 +433,36 @@ impl Context {
     pub fn get(self, key: string): string? {
         return self.keys.get(key);
     }
-    
+
+    /// Get a value from context or throw if not found
+    ///
+    /// Similar to get() but throws an error instead of returning nil.
+    /// Useful when a value is required and absence indicates a bug.
+    ///
+    /// # Arguments
+    /// * `key` - Key to retrieve
+    ///
+    /// # Returns
+    /// Stored value
+    ///
+    /// # Errors
+    /// Throws if key not found in context
+    ///
+    /// # Example
+    /// ```nv
+    /// // In auth middleware
+    /// ctx.set("user_id", "123");
+    ///
+    /// // In handler - throws if user_id missing
+    /// let user_id = try ctx.must_get("user_id");
+    /// ```
+    pub fn must_get(self, key: string): string throws {
+        if (let value = self.keys.get(key)) {
+            return value;
+        }
+        throw `Key "${key}" not found in context`;
+    }
+
     /// Get a string value from context
     pub fn get_string(self, key: string): string? {
         let value = self.keys.get(key);
@@ -628,6 +657,21 @@ test "set and get context values" {
     assert_eq ctx.get_string("user_id"), "123";
     assert_eq ctx.get_string("role"), "admin";
     assert_eq ctx.get("missing"), nil;
+}
+
+test "must_get returns value or throws" {
+    let req = try! Request.parse("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n");
+    let ctx = Context.new(req, Response.new());
+
+    ctx.set("user_id", "123");
+
+    // Should return value when key exists
+    let user_id = try! ctx.must_get("user_id");
+    assert_eq user_id, "123";
+
+    // Should throw when key doesn't exist
+    let result = try? ctx.must_get("missing_key");
+    assert_eq result, nil;
 }
 
 test "response helpers" {
