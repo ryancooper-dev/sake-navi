@@ -21,7 +21,7 @@ sake = "0.1"
 Create a new file `main.nv`:
 
 ```nv
-use sake.Engine;
+use src.Engine;
 
 fn main() throws {
     // Create a new Sake application
@@ -48,7 +48,7 @@ Visit `http://localhost:8080` in your browser!
 ## Adding More Routes
 
 ```nv
-use sake.Engine;
+use src.Engine;
 
 fn main() throws {
     let app = Engine.default();
@@ -84,9 +84,9 @@ fn main() throws {
 ## Using Middleware
 
 ```nv
-use sake.{Engine, Context};
-use sake.middleware.logger.logger;
-use sake.middleware.recovery.recovery;
+use src.{Engine, Context};
+use src.middleware.logger.logger;
+use src.middleware.recovery.recovery;
 
 fn main() throws {
     let app = Engine.default();
@@ -108,7 +108,7 @@ fn main() throws {
 Organize routes with common prefixes:
 
 ```nv
-use sake.Engine;
+use src.Engine;
 
 fn main() throws {
     let app = Engine.default();

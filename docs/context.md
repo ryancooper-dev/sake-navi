@@ -308,7 +308,7 @@ app.get("/compute", |ctx| {
 ## Full Example
 
 ```nv
-use sake.Engine;
+use src.Engine;
 
 fn main() throws {
     let app = Engine.default();

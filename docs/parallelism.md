@@ -51,7 +51,7 @@ Client requests → ├─ Worker 2 ─┼─ execute_handler()
 ### Setting Up WorkerPool
 
 ```nv
-use sake.{Engine, Config};
+use src.{Engine, Config};
 
 fn main() throws {
     let config = Config.with_defaults()
@@ -101,7 +101,7 @@ let config = Config.with_defaults()
 ### Mark Routes for Worker Pool
 
 ```nv
-use sake.{Engine, Config};
+use src.{Engine, Config};
 
 fn main() throws {
     let config = Config.with_defaults()
@@ -241,7 +241,7 @@ app.post("/process", |ctx| {
 ## Example: Hybrid Application
 
 ```nv
-use sake.{Engine, Config};
+use src.{Engine, Config};
 use std.vm;
 
 fn main() throws {

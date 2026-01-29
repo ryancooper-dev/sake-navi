@@ -20,7 +20,7 @@
 ## 🚀 Quick Start
 
 ```nv
-use sake.Engine;
+use src.Engine;
 
 fn main() throws {
     let app = Engine.default();
@@ -65,7 +65,7 @@ sake = "0.1"
 ## ⚙️ Configuration
 
 ```nv
-use sake.{Engine, Config};
+use src.{Engine, Config};
 
 let config = Config.default()
     .with_worker_pool_size(8)       // 8 worker threads (0 = auto-detect)

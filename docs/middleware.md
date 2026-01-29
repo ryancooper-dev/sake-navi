@@ -30,7 +30,7 @@ fn my_middleware(): fn(ctx: Context) throws {
 Applied to all routes:
 
 ```nv
-use sake.Engine;
+use src.Engine;
 
 fn main() throws {
     let app = Engine.default();
@@ -74,7 +74,7 @@ app.get("/admin", |ctx| { /* ... */ })
 Logs request information:
 
 ```nv
-use sake.middleware.logger.{logger, logger_with_config, LoggerConfig};
+use src.middleware.logger.{logger, logger_with_config, LoggerConfig};
 
 // Default logger
 app.use(logger());
@@ -93,7 +93,7 @@ app.use(logger_with_config(config));
 Catches panics and returns 500 error:
 
 ```nv
-use sake.middleware.recovery.{recovery, recovery_with_config, RecoveryConfig};
+use src.middleware.recovery.{recovery, recovery_with_config, RecoveryConfig};
 
 // Default recovery
 app.use(recovery());
@@ -111,7 +111,7 @@ app.use(recovery_with_config(config));
 Cross-Origin Resource Sharing:
 
 ```nv
-use sake.middleware.cors.{cors, cors_with_config, CorsConfig};
+use src.middleware.cors.{cors, cors_with_config, CorsConfig};
 
 // Allow all origins
 app.use(cors());
@@ -132,7 +132,7 @@ app.use(cors_with_config(config));
 HTTP Basic Authentication:
 
 ```nv
-use sake.middleware.basic_auth.{basic_auth, basic_auth_with_config, BasicAuthConfig};
+use src.middleware.basic_auth.{basic_auth, basic_auth_with_config, BasicAuthConfig};
 
 // Simple auth
 let accounts = {
@@ -155,7 +155,7 @@ app.use(basic_auth_with_config(config));
 Serve static files:
 
 ```nv
-use sake.middleware.static.{static_files, static_with_config, StaticConfig};
+use src.middleware.static.{static_files, static_with_config, StaticConfig};
 
 // Serve from ./public directory
 app.use(static_files("/static", "./public"));

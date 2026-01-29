@@ -9,8 +9,8 @@ The main application container.
 ### Creating an Engine
 
 ```nv
-use sake.Engine;
-use sake.Config;
+use src.Engine;
+use src.Config;
 
 // Default configuration
 let app = Engine.default();
@@ -280,7 +280,7 @@ Marks route for WorkerPool execution.
 ### Logger
 
 ```nv
-use sake.middleware.logger.{logger, logger_with_config, LoggerConfig};
+use src.middleware.logger.{logger, logger_with_config, LoggerConfig};
 
 app.use(logger());
 
@@ -295,7 +295,7 @@ app.use(logger_with_config(config));
 ### Recovery
 
 ```nv
-use sake.middleware.recovery.{recovery, recovery_with_config, RecoveryConfig};
+use src.middleware.recovery.{recovery, recovery_with_config, RecoveryConfig};
 
 app.use(recovery());
 
@@ -309,7 +309,7 @@ app.use(recovery_with_config(config));
 ### CORS
 
 ```nv
-use sake.middleware.cors.{cors, cors_with_config, CorsConfig};
+use src.middleware.cors.{cors, cors_with_config, CorsConfig};
 
 app.use(cors());
 
@@ -326,7 +326,7 @@ app.use(cors_with_config(config));
 ### Basic Auth
 
 ```nv
-use sake.middleware.basic_auth.{basic_auth, basic_auth_with_config, BasicAuthConfig};
+use src.middleware.basic_auth.{basic_auth, basic_auth_with_config, BasicAuthConfig};
 
 app.use(basic_auth({"admin": "secret"}));
 
@@ -341,7 +341,7 @@ app.use(basic_auth_with_config(config));
 ### Static Files
 
 ```nv
-use sake.middleware.static.{static_files, static_with_config, StaticConfig};
+use src.middleware.static.{static_files, static_with_config, StaticConfig};
 
 app.use(static_files("/static", "./public"));
 

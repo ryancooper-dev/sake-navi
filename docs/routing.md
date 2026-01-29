@@ -5,7 +5,7 @@ Sake provides a flexible and intuitive routing system inspired by Gin.
 ## Basic Routes
 
 ```nv
-use sake.Engine;
+use src.Engine;
 
 fn main() throws {
     let app = Engine.default();
@@ -82,7 +82,7 @@ app.any("/proxy/*path", |ctx| {
 Organize routes with common prefixes and middleware:
 
 ```nv
-use sake.Engine;
+use src.Engine;
 
 fn main() throws {
     let app = Engine.default();
@@ -132,7 +132,7 @@ app.get("/admin", |ctx| {
 Mark CPU-intensive routes to use the WorkerPool:
 
 ```nv
-use sake.{Engine, Config};
+use src.{Engine, Config};
 
 fn main() throws {
     let config = Config.with_defaults()

@@ -158,7 +158,7 @@ Implement all core Gin features with idiomatic Navi code while maintaining high 
 
 **Priority**: P1 (Common use cases)
 
-**Tests**: Inline tests in `sake/context.nv` (6 binding tests), `examples/binding.nv`
+**Tests**: Inline tests in `src/context.nv` (6 binding tests), `examples/binding.nv`
 
 ---
 
