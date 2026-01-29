@@ -12,7 +12,10 @@
 - **Optional Parallelism** - `WorkerPool` support for CPU-intensive routes
 - **Middleware Support** - Flexible middleware chain with `ctx.next()`
 - **Router Groups** - Organize routes with common prefixes and middleware
+- **Request Binding** - Parse query strings, forms, JSON, headers, and URI parameters
+- **Cookie Support** - Full cookie handling with secure options
 - **Type-Safe** - Full Navi type safety with Optional types and error handling
+- **90% Gin Parity** - Most Gin features implemented with idiomatic Navi code
 
 ## 🚀 Quick Start
 
