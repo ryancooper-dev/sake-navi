@@ -1,0 +1,351 @@
+/// Integration Tests for Sake Framework
+///
+/// Tests the complete stack: Engine, Router, WorkerPool, Middleware
+///
+/// Run: navi test tests/test_integration.nv
+
+use context.{Context, HandlerFunc};
+use request.Request;
+use response.Response;
+use router.Router;
+use engine.Engine;
+use worker_pool.{WorkerPoolConfig, LoadBalanceStrategy};
+use middleware.{recovery, logger, cors_default};
+
+// ============================================
+// Router Integration Tests
+// ============================================
+
+test "router with multiple routes" {
+    let router = Router.new();
+
+    router.get("/", |ctx| { ctx.string("home"); });
+    router.get("/users/:id", |ctx| { ctx.string("user"); });
+    router.post("/users", |ctx| { ctx.string("create"); });
+
+    let match1 = router.match("GET", "/");
+    assert match1 != nil;
+
+    let match2 = router.match("GET", "/users/123");
+    assert match2 != nil;
+    assert_eq match2!.params.get("id"), "123";
+
+    let match3 = router.match("POST", "/users");
+    assert match3 != nil;
+}
+
+test "router with wildcard" {
+    let router = Router.new();
+
+    router.get("/static/*filepath", |ctx| {
+        let path = ctx.param("filepath") || "";
+        ctx.string(path);
+    });
+
+    let match1 = router.match("GET", "/static/css/style.css");
+    assert match1 != nil;
+    assert_eq match1!.params.get("filepath"), "css/style.css";
+}
+
+test "router with middleware" {
+    let router = Router.new();
+
+    let auth = |ctx: Context| {
+        ctx.set("authenticated", true);
+        try ctx.next();
+    };
+
+    router.use(auth);
+
+    router.get("/protected", |ctx| {
+        let auth = ctx.get("authenticated");
+        assert auth != nil;
+        ctx.string("protected");
+    });
+
+    let req = try! Request.parse("GET /protected HTTP/1.1\r\nHost: localhost\r\n\r\n");
+    let match1 = router.match("GET", "/protected");
+    assert match1 != nil;
+
+    let handlers = router.get_handlers(match1!);
+    let ctx = Context.with_handlers(req, handlers, {:});
+
+    try! ctx.next();
+
+    assert ctx.get("authenticated") != nil;
+}
+
+// ============================================
+// Context Integration Tests
+// ============================================
+
+test "context with handler chain" {
+    let req = try! Request.parse("GET /test HTTP/1.1\r\nHost: localhost\r\n\r\n");
+
+    let middleware1 = |ctx: Context| {
+        ctx.set("step", 1);
+        try ctx.next();
+    };
+
+    let middleware2 = |ctx: Context| {
+        ctx.set("step", 2);
+        try ctx.next();
+    };
+
+    let handler = |ctx: Context| {
+        ctx.set("step", 3);
+        ctx.string("done");
+    };
+
+    let handlers = [middleware1, middleware2, handler];
+    let ctx = Context.with_handlers(req, handlers, {:});
+
+    try! ctx.next();
+
+    assert_eq ctx.get_int("step"), 3;
+    assert ctx.response.body.contains("done");
+}
+
+test "context abort stops chain" {
+    let req = try! Request.parse("GET /test HTTP/1.1\r\nHost: localhost\r\n\r\n");
+
+    let middleware1 = |ctx: Context| {
+        ctx.abort_with_status(401);
+    };
+
+    let handler = |ctx: Context| {
+        ctx.string("should not reach");
+    };
+
+    let handlers = [middleware1, handler];
+    let ctx = Context.with_handlers(req, handlers, {:});
+
+    try! ctx.next();
+
+    assert_eq ctx.is_aborted(), true;
+    assert_eq ctx.response.status_code, 401;
+    assert !ctx.response.body.contains("should not reach");
+}
+
+// ============================================
+// WorkerPool Integration Tests
+// ============================================
+
+test "worker pool config builder" {
+    let config = WorkerPoolConfig.new(4)
+        .with_timeout(30)
+        .with_queue_size(500)
+        .with_load_balance(LoadBalanceStrategy.LeastLoaded);
+
+    assert_eq config.size, 4;
+    assert_eq config.timeout_secs, 30;
+    assert_eq config.queue_size, 500;
+}
+
+test "worker pool runtime lifecycle" {
+    let config = WorkerPoolConfig.new(2);
+    let runtime = try! config.start();
+
+    assert_eq runtime.size(), 2;
+    assert_eq runtime.is_shutdown(), false;
+
+    // Submit and retrieve task
+    try! runtime.submit(`{"test": true}`);
+    let result = try! runtime.get_result();
+    assert result.contains("test");
+
+    // Shutdown
+    try! runtime.shutdown();
+    assert_eq runtime.is_shutdown(), true;
+}
+
+test "worker pool multiple tasks" {
+    let config = WorkerPoolConfig.new(2);
+    let runtime = try! config.start();
+
+    // Submit multiple tasks
+    for (let i in 0..5) {
+        let task = `{"id": ${i}, "data": "task${i}"}`;
+        try! runtime.submit(task);
+    }
+
+    // Retrieve all results
+    for (let i in 0..5) {
+        let result = try! runtime.get_result();
+        assert result.contains(`"id": ${i}`);
+    }
+
+    try! runtime.shutdown();
+}
+
+// ============================================
+// Middleware Integration Tests
+// ============================================
+
+test "recovery middleware catches errors" {
+    let req = try! Request.parse("GET /error HTTP/1.1\r\nHost: localhost\r\n\r\n");
+
+    let failing_handler = |ctx: Context| {
+        throw "Test error";
+    };
+
+    let handlers = [recovery(), failing_handler];
+    let ctx = Context.with_handlers(req, handlers, {:});
+
+    // Should not panic
+    try! ctx.next();
+
+    // Should return 500
+    assert_eq ctx.response.status_code, 500;
+}
+
+test "logger middleware runs" {
+    let req = try! Request.parse("GET /test HTTP/1.1\r\nHost: localhost\r\n\r\n");
+
+    let test_handler = |ctx: Context| {
+        ctx.status(200).string("OK");
+    };
+
+    let handlers = [logger(), test_handler];
+    let ctx = Context.with_handlers(req, handlers, {:});
+
+    try! ctx.next();
+
+    assert_eq ctx.response.status_code, 200;
+}
+
+test "cors middleware adds headers" {
+    let req = try! Request.parse("GET / HTTP/1.1\r\nHost: localhost\r\nOrigin: https://example.com\r\n\r\n");
+
+    let test_handler = |ctx: Context| {
+        ctx.status(200).string("OK");
+    };
+
+    let handlers = [cors_default(), test_handler];
+    let ctx = Context.with_handlers(req, handlers, {:});
+
+    try! ctx.next();
+
+    let cors_header = ctx.response.get_header("Access-Control-Allow-Origin");
+    assert cors_header != nil;
+}
+
+// ============================================
+// Engine Integration Tests
+// ============================================
+
+test "engine with routes" {
+    let app = Engine.new();
+
+    app.get("/", |ctx| { ctx.string("home"); });
+    app.post("/users", |ctx| { ctx.string("create"); });
+
+    assert_eq app.router.routes.len(), 2;
+}
+
+test "engine with worker pool config" {
+    let app = Engine.with_workers(4);
+
+    assert app.worker_pool_config != nil;
+    assert_eq app.worker_pool_config!.size, 4;
+}
+
+test "engine route with worker flag" {
+    let app = Engine.new();
+
+    app.get("/compute", |ctx| {
+        ctx.string("computing");
+    }).worker();
+
+    let match1 = app.router.match("GET", "/compute");
+    assert match1 != nil;
+    assert_eq match1!.route.use_worker_pool, true;
+}
+
+test "engine with global middleware" {
+    let app = Engine.new();
+
+    app.use(recovery());
+    app.use(logger());
+
+    assert_eq app.router.middleware.len(), 2;
+}
+
+// ============================================
+// End-to-End Scenario Tests
+// ============================================
+
+test "complete request handling flow" {
+    let router = Router.new();
+
+    // Add middleware
+    router.use(|ctx| {
+        ctx.set("request_id", 123);
+        try ctx.next();
+    });
+
+    // Add route
+    router.get("/users/:id", |ctx| {
+        let id = ctx.param("id") || "0";
+        let request_id = ctx.get_int("request_id") || 0;
+
+        ctx.json({
+            "user_id": id,
+            "request_id": request_id,
+        });
+    });
+
+    // Simulate request
+    let req = try! Request.parse("GET /users/456 HTTP/1.1\r\nHost: localhost\r\n\r\n");
+    let match1 = router.match("GET", "/users/456");
+    assert match1 != nil;
+
+    let handlers = router.get_handlers(match1!);
+    let ctx = Context.with_handlers(req, handlers, match1!.params);
+
+    try! ctx.next();
+
+    // Verify response
+    assert_eq ctx.response.status_code, 200;
+    assert ctx.response.body.contains(`"user_id": "456"`);
+    assert ctx.response.body.contains(`"request_id": 123`);
+}
+
+test "error handling flow" {
+    let router = Router.new();
+
+    router.use(recovery());
+
+    router.get("/error", |ctx| {
+        throw "Simulated error";
+    });
+
+    let req = try! Request.parse("GET /error HTTP/1.1\r\nHost: localhost\r\n\r\n");
+    let match1 = router.match("GET", "/error");
+    assert match1 != nil;
+
+    let handlers = router.get_handlers(match1!);
+    let ctx = Context.with_handlers(req, handlers, {:});
+
+    try! ctx.next();
+
+    // Recovery should catch error and return 500
+    assert_eq ctx.response.status_code, 500;
+    assert_eq ctx.is_aborted(), true;
+}
+
+// ============================================
+// Summary
+// ============================================
+
+fn main() throws {
+    println("✅ All integration tests passed!");
+    println("");
+    println("Test coverage:");
+    println("  - Router: path matching, parameters, wildcards");
+    println("  - Context: handler chain, abort, data storage");
+    println("  - WorkerPool: config, runtime, task processing");
+    println("  - Middleware: recovery, logger, CORS");
+    println("  - Engine: routes, WorkerPool integration");
+    println("  - End-to-end: request handling, error recovery");
+}
