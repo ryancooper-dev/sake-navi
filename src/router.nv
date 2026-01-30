@@ -30,6 +30,10 @@ pub struct Route {
 
     /// Route-specific middleware (executed before handler)
     pub middleware: [Handler] = [],
+
+    /// Handler ID for registered worker handlers
+    /// -1 means no registered handler (use default or closure)
+    pub handler_id: int = -1,
 }
 
 /// Route matching result
@@ -233,6 +237,36 @@ impl RouteBuilder {
     /// ```
     pub fn worker(self): RouteBuilder {
         self.router.routes[self.route_index].worker_mode = WorkerMode.Worker;
+        return self;
+    }
+
+    /// Set the handler ID for this route
+    ///
+    /// When a route is marked as .worker() and has a handler_id set,
+    /// the WorkerPool will call the registered handler from REGISTRY
+    /// instead of using the closure.
+    ///
+    /// # Arguments
+    /// * `id` - Handler ID returned from REGISTRY.register()
+    ///
+    /// # Returns
+    /// Self for chaining
+    ///
+    /// # Example
+    /// ```nv
+    /// fn compute_handler(ctx: WorkerContext): WorkerResponse throws {
+    ///     let n = ctx.query.get("n")?.parse::<int>() || 10;
+    ///     return WorkerResponse.json(200, `{"result": ${fibonacci(n)}}`);
+    /// }
+    ///
+    /// let handler_id = REGISTRY.register(compute_handler);
+    ///
+    /// app.get("/compute", |ctx| {})
+    ///     .worker()
+    ///     .with_handler_id(handler_id);
+    /// ```
+    pub fn with_handler_id(self, id: int): RouteBuilder {
+        self.router.routes[self.route_index].handler_id = id;
         return self;
     }
 

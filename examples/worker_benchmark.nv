@@ -1,0 +1,163 @@
+/// Worker Benchmark Example
+///
+/// Performance comparison between:
+/// 1. Single-threaded spawn mode (cooperative concurrency)
+/// 2. Multi-threaded WorkerPool with pure function handlers
+///
+/// Use with a load testing tool like wrk or hey:
+///
+/// # Single-threaded baseline (expect ~10 RPS for CPU-intensive):
+/// wrk -t4 -c100 -d30s http://localhost:8080/spawn/35
+///
+/// # Multi-threaded WorkerPool (expect 8-12x improvement):
+/// wrk -t4 -c100 -d30s http://localhost:8080/worker/35
+///
+/// # I/O baseline (expect similar performance):
+/// wrk -t4 -c100 -d30s http://localhost:8080/io
+/// wrk -t4 -c100 -d30s http://localhost:8080/io-worker
+
+use sake.{Engine, Config};
+use sake.{WorkerContext, WorkerResponse, REGISTRY};
+use std.time;
+
+/// CPU-intensive fibonacci computation
+fn fibonacci(n: int): int {
+    if (n <= 1) {
+        return n;
+    }
+    return fibonacci(n - 1) + fibonacci(n - 2);
+}
+
+/// Pure function handler: CPU-intensive work
+fn cpu_intensive_handler(ctx: WorkerContext): WorkerResponse throws {
+    let n_str = ctx.params.get("n") || ctx.query.get("n") || "35";
+    let n = n_str.parse_int() || 35;
+
+    // Cap at 40 to prevent timeouts
+    let n = if (n > 40) { 40 } else { n };
+
+    let start = time.now();
+    let result = fibonacci(n);
+    let elapsed = time.now() - start;
+
+    return WorkerResponse.json(200, `{
+  "n": ${n},
+  "result": ${result},
+  "elapsed_ns": ${elapsed},
+  "mode": "worker_pool"
+}`);
+}
+
+/// Pure function handler: I/O simulation (minimal CPU)
+fn io_handler(ctx: WorkerContext): WorkerResponse throws {
+    return WorkerResponse.json(200, `{"status": "ok", "mode": "worker_pool"}`);
+}
+
+fn main() throws {
+    // Configure with auto-detected worker pool size
+    let config = Config.with_defaults()
+        .with_worker_pool_size(0);  // 0 = auto-detect CPU count
+
+    let app = Engine.new(config);
+
+    // Register pure function handlers
+    let cpu_id = REGISTRY.register(cpu_intensive_handler);
+    let io_id = REGISTRY.register(io_handler);
+
+    // ===========================================
+    // Benchmark routes
+    // ===========================================
+
+    // Home page
+    app.get("/", |ctx| {
+        ctx.string(`
+Worker Benchmark Server
+
+CPU-Intensive Benchmarks:
+  /spawn/:n  - Single-threaded spawn mode
+  /worker/:n - Multi-threaded WorkerPool
+
+I/O Benchmarks:
+  /io        - Single-threaded spawn mode
+  /io-worker - Multi-threaded WorkerPool (minimal benefit for I/O)
+
+Example benchmark commands:
+  wrk -t4 -c100 -d30s http://localhost:8080/spawn/35
+  wrk -t4 -c100 -d30s http://localhost:8080/worker/35
+`);
+    });
+
+    // ===========================================
+    // CPU-intensive: Spawn mode (single-threaded)
+    // ===========================================
+    app.get("/spawn/:n", |ctx| {
+        let n_str = ctx.param("n") || "35";
+        let n = n_str.parse_int() || 35;
+        let n = if (n > 40) { 40 } else { n };
+
+        let start = time.now();
+        let result = fibonacci(n);
+        let elapsed = time.now() - start;
+
+        try? ctx.json({
+            "n": n,
+            "result": result,
+            "elapsed_ns": elapsed,
+            "mode": "spawn",
+        });
+    });
+
+    // ===========================================
+    // CPU-intensive: WorkerPool (multi-threaded)
+    // ===========================================
+    app.get("/worker/:n", |ctx| {
+        ctx.string("placeholder");
+    }).worker().with_handler_id(cpu_id);
+
+    // Query parameter variant
+    app.get("/worker", |ctx| {
+        ctx.string("placeholder");
+    }).worker().with_handler_id(cpu_id);
+
+    // ===========================================
+    // I/O: Spawn mode (single-threaded)
+    // ===========================================
+    app.get("/io", |ctx| {
+        try? ctx.json({"status": "ok", "mode": "spawn"});
+    });
+
+    // ===========================================
+    // I/O: WorkerPool (multi-threaded) - for comparison
+    // ===========================================
+    app.get("/io-worker", |ctx| {
+        ctx.string("placeholder");
+    }).worker().with_handler_id(io_id);
+
+    // ===========================================
+    // Metrics endpoint
+    // ===========================================
+    app.get("/info", |ctx| {
+        let pool_size = config.effective_worker_pool_size();
+        try? ctx.json({
+            "worker_pool_enabled": true,
+            "worker_pool_size": pool_size,
+            "registered_handlers": REGISTRY.len(),
+        });
+    });
+
+    println("Starting Worker Benchmark Server...");
+    println("");
+    println(`Worker Pool Size: ${config.effective_worker_pool_size()} threads`);
+    println(`Registered Handlers: ${REGISTRY.len()}`);
+    println("");
+    println("Benchmark commands:");
+    println("  wrk -t4 -c100 -d30s http://localhost:8080/spawn/35   # baseline");
+    println("  wrk -t4 -c100 -d30s http://localhost:8080/worker/35  # multi-threaded");
+    println("");
+    println("Expected results (12-core CPU):");
+    println("  /spawn/35:  ~10 RPS (single-threaded, ~100ms/request)");
+    println("  /worker/35: ~80-120 RPS (multi-threaded, parallel execution)");
+    println("");
+
+    try app.run(":8080");
+}

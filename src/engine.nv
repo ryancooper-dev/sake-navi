@@ -573,6 +573,7 @@ impl Engine {
                 let ctx = Context.with_handlers(request, [], matched_route.params);
                 ctx.in_worker = true;
                 ctx.worker_size = self.config.effective_worker_pool_size();
+                ctx.handler_id = matched_route.route.handler_id;
 
                 println("🟢 Step 12: Serializing to JSON");
                 let worker_ctx = ctx.to_worker_context();
@@ -708,6 +709,7 @@ impl Engine {
         let ctx = Context.with_handlers(request, [], route_match.params);
         ctx.in_worker = true;
         ctx.worker_size = self.config.effective_worker_pool_size();
+        ctx.handler_id = route_match.route.handler_id;
 
         let worker_ctx = ctx.to_worker_context();
         let ctx_json = try worker_ctx.to_json();
@@ -764,6 +766,7 @@ impl Engine {
         let ctx = Context.with_handlers(request, [], route_match.params);
         ctx.in_worker = true;
         ctx.worker_size = self.config.effective_worker_pool_size();
+        ctx.handler_id = route_match.route.handler_id;
 
         let worker_ctx = ctx.to_worker_context();
         let ctx_json = try worker_ctx.to_json();
@@ -773,7 +776,7 @@ impl Engine {
 
         // Create and send task to main thread
         if (let task_ch = worker_task_ch) {
-            let task = WorkerTask.new(ctx_json, 0, response_ch);
+            let task = WorkerTask.new(ctx_json, route_match.route.handler_id, response_ch);
             try task_ch.send(task);
 
             // Wait for response (recv() yields in spawn, allowing other tasks to run)

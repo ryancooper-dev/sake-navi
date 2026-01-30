@@ -1,0 +1,148 @@
+/// Worker Pure Function Example
+///
+/// Demonstrates the new pure function handler pattern for multi-threaded
+/// WorkerPool execution. Pure function handlers:
+/// - Receive all data through WorkerContext (no closures)
+/// - Return WorkerResponse (no mutable Context)
+/// - Are registered with REGISTRY and called by handler_id
+///
+/// This approach enables true multi-threaded parallel execution because:
+/// 1. Pure functions have no closure captures from main thread's ObjectPool
+/// 2. WorkerContext/WorkerResponse are serializable across threads
+/// 3. REGISTRY provides a global lookup table for handlers
+
+use sake.{Engine, Config};
+use sake.{WorkerContext, WorkerResponse, REGISTRY};
+
+/// Compute fibonacci number (CPU-intensive)
+fn fibonacci(n: int): int {
+    if (n <= 1) {
+        return n;
+    }
+    return fibonacci(n - 1) + fibonacci(n - 2);
+}
+
+/// Pure function handler: Hello World
+///
+/// This is a simple handler that demonstrates the WorkerHandler signature:
+/// `fn(WorkerContext): WorkerResponse throws`
+fn hello_handler(ctx: WorkerContext): WorkerResponse throws {
+    let name = ctx.query.get("name") || "World";
+    return WorkerResponse.json(200, `{"message": "Hello, ${name}!", "handler": "pure_function"}`);
+}
+
+/// Pure function handler: Fibonacci computation
+///
+/// Demonstrates parsing query parameters and returning JSON response
+fn fibonacci_handler(ctx: WorkerContext): WorkerResponse throws {
+    // Extract 'n' from query params or path params
+    let n_str = ctx.query.get("n") || ctx.params.get("n") || "10";
+    let n = try? n_str.parse::<int>() || 10;
+
+    // Validate input
+    if (n > 40) {
+        return WorkerResponse.json(400, `{"error": "Number too large (max 40)", "n": ${n}}`);
+    }
+
+    // Compute (CPU-intensive)
+    let result = fibonacci(n);
+
+    // Return JSON response
+    return WorkerResponse.json(200, `{"n": ${n}, "fibonacci": ${result}, "computed_in": "worker_pool", "handler": "pure_function"}`);
+}
+
+/// Pure function handler: Echo request details
+///
+/// Demonstrates accessing various parts of the WorkerContext
+fn echo_handler(ctx: WorkerContext): WorkerResponse throws {
+    // Build response with request details
+    let body = `{
+  "path": "${ctx.path}",
+  "method": "${ctx.method}",
+  "params": ${try ctx.params.len()},
+  "query": ${try ctx.query.len()},
+  "handler": "pure_function"
+}`;
+
+    return WorkerResponse.json(200, body);
+}
+
+fn main() throws {
+    // Configure with auto-detected worker pool size
+    let config = Config.with_defaults()
+        .with_worker_pool_size(0);  // 0 = auto-detect CPU count
+
+    let app = Engine.new(config);
+
+    // ===========================================
+    // Register pure function handlers with REGISTRY
+    // ===========================================
+    let hello_id = REGISTRY.register(hello_handler);
+    let fib_id = REGISTRY.register(fibonacci_handler);
+    let echo_id = REGISTRY.register(echo_handler);
+
+    println(`Registered handlers: hello=${hello_id}, fibonacci=${fib_id}, echo=${echo_id}`);
+
+    // ===========================================
+    // Regular closure-based route (for comparison)
+    // ===========================================
+    app.get("/", |ctx| {
+        ctx.string("Worker Pure Function Demo - Try /hello, /fib?n=35, /echo");
+    });
+
+    // ===========================================
+    // Pure function handler routes
+    // ===========================================
+
+    // Hello handler - simple JSON response
+    // The closure here is just a placeholder; actual execution happens in WorkerPool
+    app.get("/hello", |ctx| {
+        // This closure is NOT executed when .worker() is used with handler_id
+        // The WorkerPool calls the registered handler directly
+        ctx.string("placeholder");
+    }).worker().with_handler_id(hello_id);
+
+    // Fibonacci handler - CPU-intensive computation
+    app.get("/fib", |ctx| {
+        ctx.string("placeholder");
+    }).worker().with_handler_id(fib_id);
+
+    // Fibonacci with path parameter
+    app.get("/fib/:n", |ctx| {
+        ctx.string("placeholder");
+    }).worker().with_handler_id(fib_id);
+
+    // Echo handler - shows request details
+    app.get("/echo", |ctx| {
+        ctx.string("placeholder");
+    }).worker().with_handler_id(echo_id);
+
+    // ===========================================
+    // Comparison: closure-based worker (old style)
+    // ===========================================
+    app.get("/fib-closure/:n", |ctx| {
+        // This closure CANNOT actually execute in worker thread
+        // because it captures 'ctx' which is bound to main thread's ObjectPool
+        // The WorkerPool will fall back to default response
+        let n_str = ctx.param("n") || "10";
+        let n = try? n_str.parse::<int>() || 10;
+        let result = fibonacci(n);
+        try? ctx.json({"n": n, "result": result, "mode": "closure_fallback"});
+    }).worker();  // No with_handler_id - uses fallback
+
+    println("");
+    println("Starting Worker Pure Function Demo...");
+    println("");
+    println("Pure function handlers (multi-threaded):");
+    println("  http://localhost:8080/hello           - Hello world");
+    println("  http://localhost:8080/hello?name=Navi - Hello with name");
+    println("  http://localhost:8080/fib?n=35        - Fibonacci");
+    println("  http://localhost:8080/fib/35          - Fibonacci (path param)");
+    println("  http://localhost:8080/echo            - Echo request");
+    println("");
+    println("Closure-based handler (fallback):");
+    println("  http://localhost:8080/fib-closure/35  - Fallback mode");
+    println("");
+
+    try app.run(":8080");
+}

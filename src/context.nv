@@ -74,23 +74,23 @@ pub fn func_handler(func: |(Context) throws|): Handler {
 pub struct Context {
     /// The incoming HTTP request
     request: Request,
-    
+
     /// The outgoing HTTP response
     response: Response,
-    
+
     /// Path parameters extracted from route (e.g., :id)
     params: <string, string>,
-    
+
     /// Handler chain (middleware + final handler)
     handlers: [Handler],
-    
+
     /// Current index in handler chain
     index: int = -1,
-    
+
     /// Key-value store for passing data between middleware
     /// TODO: Replace with proper type once Navi supports dynamic types
     keys: <string, string>,
-    
+
     /// Whether the handler chain was aborted
     aborted: bool = false,
 
@@ -99,6 +99,10 @@ pub struct Context {
 
     /// Worker pool size (0 if not using worker pool)
     worker_size: int = 0,
+
+    /// Handler ID for registered worker handlers
+    /// -1 means no registered handler (use default or closure)
+    handler_id: int = -1,
 }
 
 impl Context {
@@ -784,13 +788,14 @@ impl Context {
     /// # Returns
     /// WorkerContext with serializable request data
     pub fn to_worker_context(self): WorkerContext {
-        return WorkerContext.new(
+        return WorkerContext.with_handler_id(
             self.request.path,
             self.request.method,
             self.request.headers,
             self.request.query_params,
             self.params,
-            self.request.body
+            self.request.body,
+            self.handler_id
         );
     }
 }

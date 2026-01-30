@@ -1,0 +1,223 @@
+/// Handler Registry for Multi-threaded Worker Handlers
+///
+/// This module provides a mechanism to register pure function handlers that can be
+/// safely executed in WorkerPool threads. Unlike closure-based handlers that capture
+/// variables from the main thread's ObjectPool, registered handlers receive all their
+/// data through the WorkerContext parameter.
+///
+/// # Architecture
+/// ```
+/// Main Thread                   Worker Thread
+///     │                              │
+///     ├─ register(handler) ─→ REGISTRY (static)
+///     │                              │
+///     ├─ WorkerContext + handler_id ─→ process_request()
+///     │                              │
+///     │                              ├─ REGISTRY.call(handler_id, ctx)
+///     │                              │
+///     │                              ├─ handler(ctx) → WorkerResponse
+///     │                              │
+///     │ ←───── WorkerResponse ───────┤
+/// ```
+///
+/// # Example
+/// ```nv
+/// use sake.{Engine, WorkerContext, WorkerResponse, REGISTRY};
+///
+/// fn my_handler(ctx: WorkerContext): WorkerResponse throws {
+///     let name = ctx.query.get("name") || "World";
+///     return WorkerResponse.json(200, `{"message": "Hello, ${name}!"}`);
+/// }
+///
+/// fn main() throws {
+///     let handler_id = REGISTRY.register(my_handler);
+///
+///     let app = Engine.with_defaults();
+///     app.get("/hello", |ctx| {}).worker().with_handler_id(handler_id);
+///     try app.run(":8080");
+/// }
+/// ```
+
+use std.json;
+
+/// Registry for storing and calling worker handlers
+///
+/// Handlers are stored by integer ID for efficient lookup in worker threads.
+/// The registry is designed to be initialized at startup and remain immutable
+/// during request processing.
+pub struct HandlerRegistry {
+    /// Registered handler functions
+    /// Type: closure that takes WorkerContext and returns WorkerResponse
+    handlers: [|(WorkerContext): WorkerResponse throws|],
+}
+
+impl HandlerRegistry {
+    /// Create a new empty HandlerRegistry
+    pub fn new(): HandlerRegistry {
+        return HandlerRegistry {
+            handlers: [],
+        };
+    }
+
+    /// Register a handler function and return its ID
+    ///
+    /// # Arguments
+    /// * `handler` - Pure function that processes WorkerContext
+    ///
+    /// # Returns
+    /// Handler ID to use with Route.with_handler_id()
+    ///
+    /// # Example
+    /// ```nv
+    /// fn my_handler(ctx: WorkerContext): WorkerResponse throws {
+    ///     return WorkerResponse.text(200, "Hello!");
+    /// }
+    ///
+    /// let id = REGISTRY.register(my_handler);
+    /// ```
+    pub fn register(self, handler: |(WorkerContext): WorkerResponse throws|): int {
+        let id = self.handlers.len();
+        self.handlers.push(handler);
+        return id;
+    }
+
+    /// Call a registered handler by ID
+    ///
+    /// # Arguments
+    /// * `id` - Handler ID returned from register()
+    /// * `ctx` - WorkerContext with request data
+    ///
+    /// # Returns
+    /// WorkerResponse from the handler
+    ///
+    /// # Errors
+    /// Throws if handler ID is invalid or handler throws
+    pub fn call(self, id: int, ctx: WorkerContext): WorkerResponse throws {
+        if (id < 0 || id >= self.handlers.len()) {
+            throw `Handler not found: id=${id}, registered=${self.handlers.len()}`;
+        }
+        let handler = self.handlers[id];
+        return try handler(ctx);
+    }
+
+    /// Get the number of registered handlers
+    pub fn len(self): int {
+        return self.handlers.len();
+    }
+
+    /// Check if a handler ID is valid
+    pub fn has(self, id: int): bool {
+        return id >= 0 && id < self.handlers.len();
+    }
+}
+
+/// Global handler registry instance
+///
+/// Use this to register handlers at startup:
+/// ```nv
+/// let id = REGISTRY.register(my_handler);
+/// ```
+///
+/// The registry is then accessed by SakeWorkerPool.process_request()
+/// to call the appropriate handler for each request.
+pub let REGISTRY: HandlerRegistry = HandlerRegistry.new();
+
+// ============================================
+// Test Helper Functions
+// ============================================
+
+fn test_handler_1(ctx: WorkerContext): WorkerResponse throws {
+    return WorkerResponse.text(200, "handler1");
+}
+
+fn test_handler_2(ctx: WorkerContext): WorkerResponse throws {
+    return WorkerResponse.text(200, "handler2");
+}
+
+fn test_handler_path(ctx: WorkerContext): WorkerResponse throws {
+    return WorkerResponse.text(200, `path: ${ctx.path}`);
+}
+
+fn test_handler_json(ctx: WorkerContext): WorkerResponse throws {
+    return WorkerResponse.json(200, `{"test": true}`);
+}
+
+// ============================================
+// Tests
+// ============================================
+
+test "create empty registry" {
+    let registry = HandlerRegistry.new();
+    assert_eq registry.len(), 0;
+}
+
+test "register handler returns incremental id" {
+    let registry = HandlerRegistry.new();
+
+    let id1 = registry.register(test_handler_1);
+    let id2 = registry.register(test_handler_2);
+
+    assert_eq id1, 0;
+    assert_eq id2, 1;
+    assert_eq registry.len(), 2;
+}
+
+test "call registered handler" {
+    let registry = HandlerRegistry.new();
+
+    let id = registry.register(test_handler_path);
+
+    let ctx = WorkerContext.new(
+        "/test",
+        "GET",
+        {:},
+        {:},
+        {:},
+        ""
+    );
+
+    let response = try! registry.call(id, ctx);
+    assert_eq response.status, 200;
+    assert_eq response.body, "path: /test";
+}
+
+test "call with invalid id throws" {
+    let registry = HandlerRegistry.new();
+
+    let ctx = WorkerContext.new(
+        "/test",
+        "GET",
+        {:},
+        {:},
+        {:},
+        ""
+    );
+
+    let threw = false;
+    if (let _ = try? registry.call(999, ctx)) {
+        // Should not succeed
+    } else {
+        threw = true;
+    }
+    assert threw;
+}
+
+test "has method" {
+    let registry = HandlerRegistry.new();
+
+    let id = registry.register(test_handler_1);
+
+    assert registry.has(id);
+    assert !registry.has(-1);
+    assert !registry.has(100);
+}
+
+test "global registry works" {
+    // Test that REGISTRY global is accessible
+    let initial_len = REGISTRY.len();
+
+    let id = REGISTRY.register(test_handler_json);
+
+    assert_eq REGISTRY.len(), initial_len + 1;
+    assert REGISTRY.has(id);
+}

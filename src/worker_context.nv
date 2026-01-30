@@ -25,6 +25,10 @@ pub struct WorkerContext {
 
     /// Request body
     pub body: string,
+
+    /// Handler ID for registered worker handlers
+    /// This is used by REGISTRY.call() to invoke the correct handler
+    pub handler_id: int = -1,
 }
 
 impl WorkerContext {
@@ -44,6 +48,28 @@ impl WorkerContext {
             query,
             params,
             body,
+            handler_id: -1,
+        };
+    }
+
+    /// Create a new WorkerContext with handler_id
+    pub fn with_handler_id(
+        path: string,
+        method: string,
+        headers: <string, string>,
+        query: <string, string>,
+        params: <string, string>,
+        body: string,
+        handler_id: int
+    ): WorkerContext {
+        return WorkerContext {
+            path,
+            method,
+            headers,
+            query,
+            params,
+            body,
+            handler_id,
         };
     }
 

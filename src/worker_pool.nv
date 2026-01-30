@@ -7,7 +7,39 @@
 
 use std.worker.Worker;
 use std.json;
-// Note: worker_context is in same module
+// Note: worker_context and handler_registry are in same module
+
+// ============================================
+// Built-in handlers for Phase 0
+// These are defined here so they're available in worker threads
+// when the module loads. In Phase 1+, we'll investigate proper
+// cross-thread handler registration.
+// ============================================
+
+/// CPU-intensive fibonacci computation
+fn fibonacci(n: int): int {
+    if (n <= 1) {
+        return n;
+    }
+    return fibonacci(n - 1) + fibonacci(n - 2);
+}
+
+/// Built-in CPU handler (handler_id = 0)
+/// Computes fibonacci for CPU benchmarking
+fn builtin_cpu_handler(ctx: WorkerContext): WorkerResponse throws {
+    let n_str = ctx.params.get("n") || "30";
+    let n = n_str.parse_int() || 30;
+    println(`[WORKER] GET ${ctx.path} (n=${n})`);
+
+    if (n > 40) {
+        return WorkerResponse.json(400, `{"error": "n too large", "max": 40}`);
+    }
+
+    let result = fibonacci(n);
+    println(`[WORKER] fibonacci(${n}) = ${result}`);
+
+    return WorkerResponse.json(200, `{"n": ${n}, "result": ${result}, "mode": "worker_pool"}`);
+}
 
 /// Worker pool for parallel task execution
 ///
@@ -56,6 +88,10 @@ impl SakeWorkerPool {
 
     /// Process a request in worker thread
     ///
+    /// This function is called by Worker.pool() in each worker thread.
+    /// It deserializes the WorkerContext, looks up the registered handler
+    /// by handler_id, and executes it.
+    ///
     /// # Arguments
     /// * `ctx_json` - Serialized WorkerContext as JSON
     ///
@@ -65,14 +101,25 @@ impl SakeWorkerPool {
         // Deserialize context
         let ctx = try WorkerContext.from_json(ctx_json);
 
-        // TODO: Execute actual handler
-        // For now, return a simple success response
-        // Actual implementation would lookup and execute the registered handler
+        // Phase 0: Use built-in handlers based on handler_id
+        // handler_id 0 = CPU-intensive fibonacci handler (for benchmarking)
+        // In Phase 1+, we'll implement proper cross-thread handler registration
+        if (ctx.handler_id == 0) {
+            let response = try builtin_cpu_handler(ctx);
+            return try response.to_json();
+        }
 
+        // Check if a handler is registered in REGISTRY (future use)
+        if (ctx.handler_id > 0 && REGISTRY.has(ctx.handler_id)) {
+            let response = try REGISTRY.call(ctx.handler_id, ctx);
+            return try response.to_json();
+        }
+
+        // Fallback: no handler found, return default response
         let response = WorkerResponse.new(
             200,
             {"Content-Type": "application/json"},
-            "{\"status\": \"ok\", \"worker\": true}"
+            `{"status": "ok", "worker": true, "handler": "default", "handler_id": ${ctx.handler_id}}`
         );
 
         return try response.to_json();
