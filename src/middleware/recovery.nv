@@ -3,7 +3,7 @@
 /// Catches errors thrown during request handling and returns
 /// a 500 Internal Server Error response instead of crashing the server.
 
-use sake.context.{Context, HandlerFunc};
+use sake.context.{Context, Handler};
 
 /// Recovery middleware configuration
 pub struct RecoveryConfig {
@@ -44,7 +44,7 @@ impl RecoveryConfig {
 /// ```nv
 /// app.use(recovery());
 /// ```
-pub fn recovery(): HandlerFunc {
+pub fn recovery(): Handler {
     return recovery_with_config(RecoveryConfig.with_defaults());
 }
 
@@ -55,7 +55,7 @@ pub fn recovery(): HandlerFunc {
 /// let config = RecoveryConfig.with_defaults().with_details();
 /// app.use(recovery_with_config(config));
 /// ```
-pub fn recovery_with_config(config: RecoveryConfig): HandlerFunc {
+pub fn recovery_with_config(config: RecoveryConfig): Handler {
     return |ctx| {
         // Try to execute handler chain
         do {

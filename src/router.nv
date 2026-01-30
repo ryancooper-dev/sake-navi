@@ -23,13 +23,13 @@ pub struct Route {
     pub path: string,
 
     /// Handler function
-    pub handler: HandlerFunc,
+    pub handler: Handler,
 
     /// Execution mode (spawn vs worker pool)
     pub worker_mode: WorkerMode = WorkerMode.Spawn,
 
     /// Route-specific middleware (executed before handler)
-    pub middleware: [HandlerFunc] = [],
+    pub middleware: [Handler] = [],
 }
 
 /// Route matching result
@@ -51,7 +51,7 @@ pub struct Router {
 pub struct RouteBuilder {
     router: Router,
     route_index: int,
-    middleware: [HandlerFunc] = [],
+    middleware: [Handler] = [],
 }
 
 /// RouterGroup for organizing routes with common prefix and middleware
@@ -78,7 +78,7 @@ pub struct RouteBuilder {
 pub struct RouterGroup {
     router: Router,
     base_path: string,
-    middleware: [HandlerFunc],
+    middleware: [Handler],
 }
 
 impl Router {
@@ -98,7 +98,7 @@ impl Router {
     ///
     /// # Returns
     /// RouteBuilder for further configuration
-    pub fn add_route(self, method: string, path: string, handler: HandlerFunc): RouteBuilder {
+    pub fn add_route(self, method: string, path: string, handler: Handler): RouteBuilder {
         let route = Route {
             method: method.to_uppercase(),
             path,
@@ -250,7 +250,7 @@ impl RouteBuilder {
     ///     ctx.string("Admin panel");
     /// }).add_middleware(auth_middleware).add_middleware(log_middleware);
     /// ```
-    pub fn add_middleware(self, middleware: HandlerFunc): RouteBuilder {
+    pub fn add_middleware(self, middleware: Handler): RouteBuilder {
         self.middleware.push(middleware);
         self.router.routes[self.route_index].middleware.push(middleware);
         return self;
@@ -264,7 +264,7 @@ impl RouterGroup {
     /// * `router` - Router instance
     /// * `base_path` - Path prefix for all routes in this group
     /// * `middleware` - Initial middleware for this group
-    pub fn new(router: Router, base_path: string, middleware: [HandlerFunc]): RouterGroup {
+    pub fn new(router: Router, base_path: string, middleware: [Handler]): RouterGroup {
         // Ensure base path doesn't end with /
         let clean_path = base_path;
         if (base_path.len() > 1 && base_path.ends_with("/")) {
@@ -302,7 +302,7 @@ impl RouterGroup {
     }
 
     /// Register a GET route in this group
-    pub fn get(self, path: string, handler: HandlerFunc): RouteBuilder {
+    pub fn get(self, path: string, handler: Handler): RouteBuilder {
         let full_path = self.combine_path(path);
         let builder = self.router.add_route("GET", full_path, handler);
         // Copy group middleware to route (not just builder)
@@ -313,7 +313,7 @@ impl RouterGroup {
     }
 
     /// Register a POST route in this group
-    pub fn post(self, path: string, handler: HandlerFunc): RouteBuilder {
+    pub fn post(self, path: string, handler: Handler): RouteBuilder {
         let full_path = self.combine_path(path);
         let builder = self.router.add_route("POST", full_path, handler);
         // Copy group middleware to route (not just builder)
@@ -324,7 +324,7 @@ impl RouterGroup {
     }
 
     /// Register a PUT route in this group
-    pub fn put(self, path: string, handler: HandlerFunc): RouteBuilder {
+    pub fn put(self, path: string, handler: Handler): RouteBuilder {
         let full_path = self.combine_path(path);
         let builder = self.router.add_route("PUT", full_path, handler);
         // Copy group middleware to route (not just builder)
@@ -335,7 +335,7 @@ impl RouterGroup {
     }
 
     /// Register a DELETE route in this group
-    pub fn delete(self, path: string, handler: HandlerFunc): RouteBuilder {
+    pub fn delete(self, path: string, handler: Handler): RouteBuilder {
         let full_path = self.combine_path(path);
         let builder = self.router.add_route("DELETE", full_path, handler);
         // Copy group middleware to route (not just builder)
@@ -346,7 +346,7 @@ impl RouterGroup {
     }
 
     /// Register a PATCH route in this group
-    pub fn patch(self, path: string, handler: HandlerFunc): RouteBuilder {
+    pub fn patch(self, path: string, handler: Handler): RouteBuilder {
         let full_path = self.combine_path(path);
         let builder = self.router.add_route("PATCH", full_path, handler);
         // Copy group middleware to route (not just builder)
@@ -357,7 +357,7 @@ impl RouterGroup {
     }
 
     /// Register an OPTIONS route in this group
-    pub fn options(self, path: string, handler: HandlerFunc): RouteBuilder {
+    pub fn options(self, path: string, handler: Handler): RouteBuilder {
         let full_path = self.combine_path(path);
         let builder = self.router.add_route("OPTIONS", full_path, handler);
         // Copy group middleware to route (not just builder)
@@ -368,7 +368,7 @@ impl RouterGroup {
     }
 
     /// Register a HEAD route in this group
-    pub fn head(self, path: string, handler: HandlerFunc): RouteBuilder {
+    pub fn head(self, path: string, handler: Handler): RouteBuilder {
         let full_path = self.combine_path(path);
         let builder = self.router.add_route("HEAD", full_path, handler);
         // Copy group middleware to route (not just builder)
@@ -389,7 +389,7 @@ impl RouterGroup {
     /// api.add_middleware(auth_middleware);
     /// api.add_middleware(rate_limit_middleware);
     /// ```
-    pub fn add_middleware(self, middleware: HandlerFunc) {
+    pub fn add_middleware(self, middleware: Handler) {
         self.middleware.push(middleware);
     }
 
@@ -411,7 +411,7 @@ impl RouterGroup {
         let full_path = self.combine_path(path);
 
         // Copy parent middleware to child group
-        let child_middleware: [HandlerFunc] = [];
+        let child_middleware: [Handler] = [];
         for (let mw in self.middleware) {
             child_middleware.push(mw);
         }
@@ -429,23 +429,97 @@ test "create empty router" {
     assert_eq router.routes.len(), 0;
 }
 
-// NOTE: Tests that use closures are disabled due to Navi's type inference limitations
-// The compiler cannot infer closure parameter types in all contexts.
-// This is a known limitation and will be addressed in future Navi versions.
-
 test "router initialization" {
     let router = Router.new();
     assert_eq router.routes.len(), 0;
 }
 
-// TODO: Re-enable router matching tests once Navi closure type inference is fixed
-// test "match exact path" { ... }
-// test "match with path parameter" { ... }
-// test "match with multiple parameters" { ... }
-// test "no match for different method" { ... }
-// test "no match for different path" { ... }
-// test "no match for different segment count" { ... }
-// test "method matching is case insensitive" { ... }
+test "match exact path" {
+    let router = Router.new();
+    router.add_route("GET", "/users", func_handler(|ctx| { ctx.string("Users"); }));
+
+    let route_match = router.find_match("GET", "/users");
+    if (let _ = route_match) {
+        // Match found
+    } else {
+        panic("Expected route match");
+    }
+}
+
+test "match with path parameter" {
+    let router = Router.new();
+    router.add_route("GET", "/users/:id", func_handler(|ctx| { ctx.string("User"); }));
+
+    let route_match = router.find_match("GET", "/users/123");
+    if (let m = route_match) {
+        assert_eq m.params.get("id"), "123";
+    } else {
+        panic("Expected route match");
+    }
+}
+
+test "match with multiple parameters" {
+    let router = Router.new();
+    router.add_route("GET", "/users/:id/posts/:post_id", func_handler(|ctx| { ctx.string("Post"); }));
+
+    let route_match = router.find_match("GET", "/users/123/posts/456");
+    if (let m = route_match) {
+        assert_eq m.params.get("id"), "123";
+        assert_eq m.params.get("post_id"), "456";
+    } else {
+        panic("Expected route match");
+    }
+}
+
+test "no match for different method" {
+    let router = Router.new();
+    router.add_route("GET", "/users", func_handler(|ctx| { ctx.string("Users"); }));
+
+    let route_match = router.find_match("POST", "/users");
+    if (let _ = route_match) {
+        panic("Expected no match");
+    }
+}
+
+test "no match for different path" {
+    let router = Router.new();
+    router.add_route("GET", "/users", func_handler(|ctx| { ctx.string("Users"); }));
+
+    let route_match = router.find_match("GET", "/posts");
+    if (let _ = route_match) {
+        panic("Expected no match");
+    }
+}
+
+test "no match for different segment count" {
+    let router = Router.new();
+    router.add_route("GET", "/users/:id", func_handler(|ctx| { ctx.string("User"); }));
+
+    let route_match = router.find_match("GET", "/users");
+    if (let _ = route_match) {
+        panic("Expected no match");
+    }
+}
+
+test "method matching is case insensitive" {
+    let router = Router.new();
+    router.add_route("GET", "/users", func_handler(|ctx| { ctx.string("Users"); }));
+
+    let route_match_lower = router.find_match("get", "/users");
+    let route_match_upper = router.find_match("GET", "/users");
+
+    if (let _ = route_match_lower) {
+        // OK
+    } else {
+        panic("Expected match for lowercase");
+    }
+
+    if (let _ = route_match_upper) {
+        // OK
+    } else {
+        panic("Expected match for uppercase");
+    }
+}
 
 test "match path static function" {
     let params = Router.match_path("/users/:id", "/users/123");
@@ -544,9 +618,26 @@ test "router group root path" {
     assert_eq group.combine_path("/"), "/api";
 }
 
-// TODO: Re-enable router group and middleware tests once Navi closure type inference is fixed
-// test "router group add route" { ... }
-// test "router group nested groups" { ... }
+test "router group add route" {
+    let router = Router.new();
+    let group = RouterGroup.new(router, "/api", []);
+
+    group.get("/users", func_handler(|ctx| { ctx.string("Users"); }));
+
+    assert_eq router.routes.len(), 1;
+    assert_eq router.routes[0].path, "/api/users";
+}
+
+test "router group nested groups" {
+    let router = Router.new();
+    let api = RouterGroup.new(router, "/api", []);
+    let v1 = api.group("/v1");
+
+    v1.get("/users", func_handler(|ctx| { ctx.string("V1 Users"); }));
+
+    assert_eq router.routes.len(), 1;
+    assert_eq router.routes[0].path, "/api/v1/users";
+}
 // test "router group middleware inheritance" { ... }
 // test "router group all http methods" { ... }
 // test "route level middleware" { ... }

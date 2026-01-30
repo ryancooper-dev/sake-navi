@@ -1,0 +1,71 @@
+/// Test spawning from within a while loop inside an impl method
+/// This more closely mimics the engine.nv scenario
+
+use std.time;
+
+struct Server {
+    counter_ch: channel<int>?,
+    data: string,
+}
+
+impl Server {
+    fn new(): Server {
+        return Server {
+            counter_ch: nil,
+            data: "server_data",
+        };
+    }
+
+    fn run_with_loop(self) throws {
+        // Initialize channel
+        let ch = channel::<int>();
+        self.counter_ch = ch;
+
+        println("Starting server loop...");
+
+        let iterations = 0;
+        while (iterations < 3) {
+            println(`\nIteration ${iterations}`);
+
+            // Extract value before spawn (like we're trying in engine.nv)
+            let counter_ch_copy = self.counter_ch;
+            let data_copy = self.data;
+            let iter_copy = iterations;
+
+            // Spawn from within the loop
+            spawn {
+                println(`  Spawned task for iteration ${iter_copy}`);
+                println(`  Data: ${data_copy}`);
+
+                if (let ch = counter_ch_copy) {
+                    try! ch.send(iter_copy);
+                }
+            }
+
+            iterations += 1;
+
+            // Small delay to let spawns execute
+            time.sleep(0.05.seconds());
+        }
+
+        // Collect results
+        println("\nCollecting results...");
+        if (let ch = self.counter_ch) {
+            for (let i in 0..3) {
+                let result = try ch.recv();
+                println(`  Received: ${result}`);
+            }
+        }
+
+        println("Loop completed!");
+    }
+}
+
+fn main() throws {
+    println("=== Testing spawn from while loop ===\n");
+
+    let server = Server.new();
+    try server.run_with_loop();
+
+    println("\n=== Test completed ===");
+}

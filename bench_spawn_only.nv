@@ -1,0 +1,30 @@
+/// Benchmark: spawn only (no worker pool)
+fn minimal_handler(input: string): string throws {
+    return input;
+}
+
+fn main() throws {
+    let iterations = 10000;
+    println(`spawn only: ${iterations} iterations`);
+
+    let ch = channel::<string>();
+
+    for (let i in 0..iterations) {
+        spawn {
+            let ch = ch;
+            let i = i;
+            let result = try? minimal_handler(`test_${i}`);
+            if (let r = result) {
+                try? ch.send(r);
+            }
+        }
+    }
+
+    let count = 0;
+    for (let i in 0..iterations) {
+        let _ = try? ch.recv();
+        count = count + 1;
+    }
+
+    println(`Completed: ${count}`);
+}

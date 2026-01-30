@@ -17,12 +17,61 @@ use std.fs;
 use std.json;
 // Note: request, response, worker_context are in same module
 
-/// Handler function type
-/// All handlers and middleware use this signature
-pub type HandlerFunc = |(Context) throws|;
+/// Handler interface for request handlers
+///
+/// Handlers take a Context and can modify the response.
+/// They can also call ctx.next() to pass control to the next handler.
+///
+/// # Example
+/// ```nv
+/// use src.{func_handler, Context};
+///
+/// let handler = func_handler(|ctx| {
+///     ctx.string("Hello!");
+/// });
+/// ```
+pub interface Handler {
+    fn handle(self, ctx: Context) throws;
+}
+
+/// Internal struct to wrap closures as Handlers
+struct FuncHandler {
+    func: |(Context) throws|,
+}
+
+impl Handler for FuncHandler {
+    pub fn handle(self, ctx: Context) throws {
+        try (self.func)(ctx);
+    }
+}
+
+/// Create a handler from a closure
+///
+/// This function wraps a closure in a Handler interface, enabling
+/// type inference for the closure parameter.
+///
+/// # Arguments
+/// * `func` - Closure that takes a Context
+///
+/// # Returns
+/// Handler that executes the closure
+///
+/// # Example
+/// ```nv
+/// use src.{Engine, func_handler};
+///
+/// let app = Engine.with_defaults();
+///
+/// app.get("/", func_handler(|ctx| {
+///     ctx.string("Hello, Sake!");
+/// }));
+/// ```
+pub fn func_handler(func: |(Context) throws|): Handler {
+    return FuncHandler { func };
+}
 
 /// Request context - the primary interface for handlers
-struct Context {
+pub struct Context {
     /// The incoming HTTP request
     request: Request,
     
@@ -33,7 +82,7 @@ struct Context {
     params: <string, string>,
     
     /// Handler chain (middleware + final handler)
-    handlers: [HandlerFunc],
+    handlers: [Handler],
     
     /// Current index in handler chain
     index: int = -1,
@@ -65,7 +114,7 @@ impl Context {
     }
     
     /// Create context with handlers
-    pub fn with_handlers(request: Request, handlers: [HandlerFunc], params: <string, string>): Context {
+    pub fn with_handlers(request: Request, handlers: [Handler], params: <string, string>): Context {
         return Context {
             request,
             response: Response.new(),
@@ -566,7 +615,7 @@ impl Context {
     /// 
     /// # Example
     /// ```nv
-    /// fn logger(): HandlerFunc {
+    /// fn logger(): Handler {
     ///     return |ctx| {
     ///         let start = time.now();
     ///         try ctx.next();  // Execute rest of chain
@@ -580,7 +629,7 @@ impl Context {
         
         while (self.index < self.handlers.len() && !self.aborted) {
             let handler = self.handlers[self.index];
-            try handler(self);
+            try handler.handle(self);
             self.index += 1;
         }
     }

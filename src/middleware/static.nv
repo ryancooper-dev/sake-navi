@@ -4,7 +4,7 @@
 
 use std.fs;
 use std.path;
-use sake.context.{Context, HandlerFunc};
+use sake.context.{Context, Handler};
 
 /// Static file middleware configuration
 pub struct StaticConfig {
@@ -73,7 +73,7 @@ impl StaticConfig {
 ///
 /// // GET /style.css -> serves ./public/style.css
 /// ```
-pub fn static_files(root: string): HandlerFunc {
+pub fn static_files(root: string): Handler {
     let config = StaticConfig.with_root(root);
     return static_with_config(config);
 }
@@ -89,7 +89,7 @@ pub fn static_files(root: string): HandlerFunc {
 ///
 /// // GET /static/image.png -> serves ./assets/image.png
 /// ```
-pub fn static_with_config(config: StaticConfig): HandlerFunc {
+pub fn static_with_config(config: StaticConfig): Handler {
     return |ctx| {
         let request_path = ctx.path();
 

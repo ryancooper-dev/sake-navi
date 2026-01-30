@@ -1,0 +1,180 @@
+/// Test file for spawn variable capture in Navi
+/// Tests various scenarios of variable capture in spawn blocks
+
+use std.time;
+
+// Test struct for capture testing
+struct Counter {
+    value: int,
+    label: string,
+}
+
+impl Counter {
+    fn new(label: string): Counter {
+        return Counter { value: 0, label: label };
+    }
+
+    fn increment(self) {
+        self.value += 1;
+    }
+
+    fn get_value(self): int {
+        return self.value;
+    }
+
+    // Test 3: Capturing self in impl method
+    fn spawn_with_self(self) throws {
+        let ch = channel::<string>();
+
+        spawn {
+            // Capture self and access its fields
+            let msg = `${self.label}: ${self.value}`;
+            try! ch.send(msg);
+        }
+
+        let result = try ch.recv();
+        println(`[Test 3] Self capture result: ${result}`);
+    }
+}
+
+// Test 5: Function that captures parameters
+fn capture_params(name: string, count: int) throws {
+    let ch = channel::<string>();
+
+    spawn {
+        // Capture function parameters
+        let msg = `${name} called ${count} times`;
+        try! ch.send(msg);
+    }
+
+    let result = try ch.recv();
+    println(`[Test 5] Param capture result: ${result}`);
+}
+
+fn main() throws {
+    println("=== Navi Spawn Variable Capture Tests ===\n");
+
+    // Test 1: Capture int and string primitives
+    println("Test 1: Capturing int and string primitives");
+    let number = 42;
+    let text = "Hello Navi";
+    let ch1 = channel::<string>();
+
+    spawn {
+        // Capture primitives
+        let msg = `Number: ${number}, Text: ${text}`;
+        try! ch1.send(msg);
+    }
+
+    let result1 = try ch1.recv();
+    println(`[Test 1] Primitive capture result: ${result1}`);
+    println("");
+
+    // Test 2: Capture struct instance
+    println("Test 2: Capturing struct instance");
+    let counter = Counter.new("MyCounter");
+    counter.value = 100;
+
+    let ch2 = channel::<string>();
+
+    spawn {
+        // Capture struct
+        let msg = `Counter - Label: ${counter.label}, Value: ${counter.value}`;
+        try! ch2.send(msg);
+    }
+
+    let result2 = try ch2.recv();
+    println(`[Test 2] Struct capture result: ${result2}`);
+    println("");
+
+    // Test 3: Capturing self in impl method
+    println("Test 3: Capturing self in impl method");
+    let counter3 = Counter.new("SelfTest");
+    counter3.value = 999;
+    try counter3.spawn_with_self();
+    println("");
+
+    // Test 4: Capturing mutable variables
+    println("Test 4: Capturing mutable variables");
+    let mutable_var = 10;
+    let ch4 = channel::<int>();
+
+    // Note: In single-threaded concurrency, modifications to captured
+    // variables may not be visible across spawn boundaries
+    spawn {
+        // Capture mutable variable
+        let captured_value = mutable_var;
+        try! ch4.send(captured_value);
+    }
+
+    // Modify after spawn
+    mutable_var = 20;
+
+    let result4 = try ch4.recv();
+    println(`[Test 4] Mutable var captured value: ${result4}`);
+    println(`[Test 4] Mutable var current value: ${mutable_var}`);
+    println("");
+
+    // Test 5: Capturing function parameters
+    println("Test 5: Capturing function parameters");
+    try capture_params("TestFunc", 5);
+    println("");
+
+    // Test 6: Multiple variables of different types
+    println("Test 6: Multiple captures in single spawn");
+    let int_val = 123;
+    let float_val = 3.14;
+    let bool_val = true;
+    let str_val = "multiple";
+    let array_val = [1, 2, 3];
+
+    let ch6 = channel::<string>();
+
+    spawn {
+        let array_sum = array_val[0] + array_val[1] + array_val[2];
+        let msg = `Int: ${int_val}, Float: ${float_val}, Bool: ${bool_val}, String: ${str_val}, Array sum: ${array_sum}`;
+        try! ch6.send(msg);
+    }
+
+    let result6 = try ch6.recv();
+    println(`[Test 6] Multiple capture result: ${result6}`);
+    println("");
+
+    // Test 7: Nested struct capture
+    println("Test 7: Nested struct with multiple fields");
+    let counter7 = Counter { value: 777, label: "Nested" };
+    let ch7 = channel::<int>();
+
+    spawn {
+        // Access struct fields in spawn
+        let doubled = counter7.value * 2;
+        try! ch7.send(doubled);
+    }
+
+    let result7 = try ch7.recv();
+    println(`[Test 7] Original value: ${counter7.value}, Doubled: ${result7}`);
+    println("");
+
+    // Test 8: Closure-like behavior
+    println("Test 8: Multiple spawns capturing same variable");
+    let shared = "shared_value";
+
+    let ch8a = channel::<string>();
+    let ch8b = channel::<string>();
+
+    spawn {
+        try! ch8a.send(`Spawn A: ${shared}`);
+    }
+
+    spawn {
+        try! ch8b.send(`Spawn B: ${shared}`);
+    }
+
+    let result8a = try ch8a.recv();
+    let result8b = try ch8b.recv();
+    println(`[Test 8] ${result8a}`);
+    println(`[Test 8] ${result8b}`);
+    println("");
+
+    println("=== All tests completed ===");
+}

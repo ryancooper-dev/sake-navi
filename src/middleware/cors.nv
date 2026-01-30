@@ -3,7 +3,7 @@
 /// Handles CORS preflight requests and adds appropriate headers
 /// to allow cross-origin requests from browsers.
 
-use sake.context.{Context, HandlerFunc};
+use sake.context.{Context, Handler};
 
 /// CORS middleware configuration
 pub struct CorsConfig {
@@ -84,7 +84,7 @@ impl CorsConfig {
 /// ```nv
 /// app.use(cors());
 /// ```
-pub fn cors(): HandlerFunc {
+pub fn cors(): Handler {
     return cors_with_config(CorsConfig.with_defaults());
 }
 
@@ -97,7 +97,7 @@ pub fn cors(): HandlerFunc {
 ///     .with_credentials();
 /// app.use(cors_with_config(config));
 /// ```
-pub fn cors_with_config(config: CorsConfig): HandlerFunc {
+pub fn cors_with_config(config: CorsConfig): Handler {
     return |ctx| {
         let origin = ctx.header("origin") || "";
 

@@ -5,7 +5,7 @@
 
 // TODO: Navi doesn't have base64 in std.encoding yet
 // use std.encoding.base64;
-use sake.context.{Context, HandlerFunc};
+use sake.context.{Context, Handler};
 
 /// Temporary base64 decode stub
 /// TODO: Implement proper base64 decoding
@@ -79,7 +79,7 @@ impl BasicAuthConfig {
 /// ];
 /// app.use(basic_auth(accounts));
 /// ```
-pub fn basic_auth(accounts: [Account]): HandlerFunc {
+pub fn basic_auth(accounts: [Account]): Handler {
     let config = BasicAuthConfig.with_accounts(accounts);
     return basic_auth_with_config(config);
 }
@@ -93,7 +93,7 @@ pub fn basic_auth(accounts: [Account]): HandlerFunc {
 /// ]).with_realm("Admin Area");
 /// app.use(basic_auth_with_config(config));
 /// ```
-pub fn basic_auth_with_config(config: BasicAuthConfig): HandlerFunc {
+pub fn basic_auth_with_config(config: BasicAuthConfig): Handler {
     return |ctx| {
         // Get Authorization header
         let auth_header = ctx.header("authorization");

@@ -1,0 +1,40 @@
+/// Benchmark: spawn → pool.map() (Request → Worker → Spawn pattern)
+use std.worker.Worker;
+
+fn minimal_handler(input: string): string throws {
+    return input;
+}
+
+fn main() throws {
+    let iterations = 10000;
+    println(`spawn → pool.map(): ${iterations} iterations`);
+
+    let pool = try Worker.pool(minimal_handler);
+
+    // Warmup
+    for (let i in 0..100) {
+        let _ = try pool.map(`warmup`);
+    }
+
+    let ch = channel::<string>();
+
+    for (let i in 0..iterations) {
+        spawn {
+            let ch = ch;
+            let i = i;
+            let pool = pool;
+            let result_opt = try? pool.map(`test_${i}`);
+            if (let result = result_opt) {
+                try? ch.send(result);
+            }
+        }
+    }
+
+    let count = 0;
+    for (let i in 0..iterations) {
+        let _ = try? ch.recv();
+        count = count + 1;
+    }
+
+    println(`Completed: ${count}`);
+}

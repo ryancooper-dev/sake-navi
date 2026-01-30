@@ -1,0 +1,26 @@
+/// Benchmark: Worker.pool.map() calls (serial)
+use std.worker.Worker;
+
+fn minimal_handler(input: string): string throws {
+    return input;
+}
+
+fn main() throws {
+    let iterations = 10000;
+    println(`pool.map() calls: ${iterations} iterations`);
+
+    let pool = try Worker.pool(minimal_handler);
+
+    // Warmup
+    for (let i in 0..100) {
+        let _ = try pool.map(`warmup`);
+    }
+
+    let count = 0;
+    for (let i in 0..iterations) {
+        let _ = try pool.map(`test_${i}`);
+        count = count + 1;
+    }
+
+    println(`Completed: ${count}`);
+}

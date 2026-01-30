@@ -1,0 +1,19 @@
+/// Benchmark: Direct function calls (baseline)
+use std.worker.Worker;
+
+fn minimal_handler(input: string): string throws {
+    return input;
+}
+
+fn main() throws {
+    let iterations = 100000;
+    println(`Direct calls: ${iterations} iterations`);
+
+    let count = 0;
+    for (let i in 0..iterations) {
+        let _ = try minimal_handler(`test_${i}`);
+        count = count + 1;
+    }
+
+    println(`Completed: ${count}`);
+}

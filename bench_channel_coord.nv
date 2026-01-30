@@ -1,0 +1,65 @@
+/// Benchmark: Channel coordination (Current architecture)
+use std.worker.Worker;
+
+struct Task {
+    pub id: int,
+    pub data: string,
+}
+
+fn minimal_handler(input: string): string throws {
+    return input;
+}
+
+fn main() throws {
+    let iterations = 10000;
+    println(`Channel coordination: ${iterations} iterations`);
+
+    let pool = try Worker.pool(minimal_handler);
+
+    // Warmup
+    for (let i in 0..100) {
+        let _ = try pool.map(`warmup`);
+    }
+
+    let task_ch = channel::<Task>();
+    let result_ch = channel::<string>();
+
+    // Coordinator
+    spawn {
+        let task_ch = task_ch;
+        let result_ch = result_ch;
+        let pool = pool;
+
+        loop {
+            let task_opt = try? task_ch.recv();
+            if (let task = task_opt) {
+                let result_opt = try? pool.map(task.data);
+                if (let result = result_opt) {
+                    try? result_ch.send(result);
+                }
+            } else {
+                break;
+            }
+        }
+    }
+
+    // Requests
+    for (let i in 0..iterations) {
+        spawn {
+            let i = i;
+            let task_ch = task_ch;
+            try? task_ch.send(Task { id: i, data: `test_${i}` });
+        }
+    }
+
+    // Collect results
+    let count = 0;
+    for (let i in 0..iterations) {
+        let _ = try? result_ch.recv();
+        count = count + 1;
+    }
+
+    task_ch.close();
+
+    println(`Completed: ${count}`);
+}

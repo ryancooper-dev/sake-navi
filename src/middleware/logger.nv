@@ -4,7 +4,7 @@
 /// Provides colorized output for different status codes.
 
 use std.time;
-use sake.context.{Context, HandlerFunc};
+use sake.context.{Context, Handler};
 use sake.request.Request;
 
 /// ANSI color codes for terminal output
@@ -51,7 +51,7 @@ impl LoggerConfig {
 /// ```nv
 /// app.use(logger());
 /// ```
-pub fn logger(): HandlerFunc {
+pub fn logger(): Handler {
     return logger_with_config(LoggerConfig.with_defaults());
 }
 
@@ -62,7 +62,7 @@ pub fn logger(): HandlerFunc {
 /// let config = LoggerConfig.with_defaults().without_colors();
 /// app.use(logger_with_config(config));
 /// ```
-pub fn logger_with_config(config: LoggerConfig): HandlerFunc {
+pub fn logger_with_config(config: LoggerConfig): Handler {
     return |ctx| {
         if (!config.log_requests) {
             try ctx.next();

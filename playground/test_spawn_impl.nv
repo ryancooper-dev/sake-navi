@@ -1,0 +1,89 @@
+/// Test spawning from within impl method and capturing struct fields
+/// This mimics the exact scenario in engine.nv
+
+struct Server {
+    counter_ch: channel<int>?,
+    data: string,
+}
+
+impl Server {
+    fn new(): Server {
+        return Server {
+            counter_ch: nil,
+            data: "server_data",
+        };
+    }
+
+    fn run(self) throws {
+        // Initialize channel
+        let ch = channel::<int>();
+        self.counter_ch = ch;
+
+        // Test 1: Can we capture self fields directly?
+        println("Test 1: Attempting to capture self fields in spawn...");
+
+        // This is what we're trying in engine.nv
+        if (let counter_ch = self.counter_ch) {
+            try! counter_ch.send(1);
+        }
+
+        // Try to spawn and capture
+        spawn {
+            println("Inside spawn!");
+            // Try to access self.data
+            println(`Data: ${self.data}`);
+        }
+
+        // Wait a bit
+        time.sleep(0.1.seconds());
+        println("Test 1 completed");
+    }
+
+    fn run_with_extracted_values(self) throws {
+        // Initialize channel
+        let ch = channel::<int>();
+        self.counter_ch = ch;
+
+        println("\nTest 2: Capturing extracted values instead of self fields...");
+
+        // Extract values before spawn
+        let data_copy = self.data;
+        let counter_ch_copy = self.counter_ch;
+
+        // Spawn with captured local variables
+        spawn {
+            println("Inside spawn with extracted values!");
+            println(`Data copy: ${data_copy}`);
+
+            if (let ch = counter_ch_copy) {
+                try! ch.send(42);
+            }
+        }
+
+        // Wait and check
+        time.sleep(0.1.seconds());
+
+        if (let ch = self.counter_ch) {
+            let received = try ch.recv();
+            println(`Received from spawn: ${received}`);
+        }
+
+        println("Test 2 completed");
+    }
+}
+
+use std.time;
+
+fn main() throws {
+    println("=== Testing spawn from impl methods ===\n");
+
+    let server = Server.new();
+
+    // Test 1: Direct self field access in spawn
+    try? server.run();
+
+    // Test 2: Extracted values
+    try server.run_with_extracted_values();
+
+    println("\n=== All tests completed ===");
+}

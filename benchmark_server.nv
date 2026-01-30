@@ -1,0 +1,43 @@
+/// Benchmark server for Sake framework
+/// Simple server for load testing
+
+use src.{Engine, Config, func_handler};
+
+fn main() throws {
+    let config = Config.with_defaults()
+        .with_max_connections(10000)
+        .with_worker_pool(true);  // Test worker pool mode
+
+    let app = Engine.new(config);
+
+    // Register routes using func_handler pattern with worker pool
+    // Each route needs .worker() to use the worker pool
+
+    app.get("/", func_handler(|ctx| {
+        ctx.string("Hello, World!");
+    })).worker();
+
+    app.get("/json", func_handler(|ctx| {
+        try? ctx.json({
+            "message": "Hello from Sake!",
+            "status": "ok",
+        });
+    })).worker();
+
+    app.get("/echo/:name", func_handler(|ctx| {
+        let name = ctx.param("name") || "World";
+        ctx.string(`Hello, ${name}!`);
+    })).worker();
+
+    println("🍶 Sake Benchmark Server");
+    println("========================");
+    println("Endpoints:");
+    println("  GET /         - Simple text response");
+    println("  GET /json     - JSON response");
+    println("  GET /echo/:name - Echo with parameter");
+    println("");
+    println("Starting server on 0.0.0.0:8080...");
+
+    // Start server
+    try app.run("0.0.0.0:8080");
+}
