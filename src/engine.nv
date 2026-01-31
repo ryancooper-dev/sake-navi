@@ -21,7 +21,8 @@
 /// }
 /// ```
 
-use std.net.{TcpListener, Connection};
+use _std.net.TcpConnection as _TcpConnection;
+use std.net.{TcpListener, TcpBufReader, TcpConnection, Connection};
 use std.io.{BufReader, Bytes};
 use std.time;
 // Note: config, router, context, request, response, worker_pool, worker_task, metrics are in same module
@@ -301,20 +302,23 @@ impl Engine {
     /// Run server in spawn-only mode (no WorkerPool)
     /// Main thread accepts connections, each handled in spawn
     ///
-    /// P0 Optimizations:
+    /// Optimizations:
     /// - Connection limiting: fast-reject when at max_connections
+    /// - Keep-Alive: reuse connections for multiple requests (when enabled)
     fn run_spawn_only(self, listener: TcpListener) throws {
         // Connection counter using object reference (spawn-safe in single-threaded mode)
         let counter = ConnectionCounter.new();
+        let enable_keep_alive = self.config.enable_keep_alive;
+        let keep_alive_timeout = self.config.keep_alive_timeout;
 
         loop {
-            // Accept connection (blocking)
-            let stream = try listener.accept();
+            // Accept connection (blocking) - use accept_tcp() for TcpConnection type
+            let conn = try listener.accept_tcp();
 
-            // P0: Connection limiting - fast reject when at capacity
+            // Connection limiting - fast reject when at capacity
             if (counter.get() >= self.config.max_connections) {
-                try? stream.write_all("HTTP/1.1 503 Service Unavailable\r\nRetry-After: 1\r\nConnection: close\r\nContent-Length: 0\r\n\r\n".bytes());
-                try? stream.close();
+                try? conn.write_all("HTTP/1.1 503 Service Unavailable\r\nRetry-After: 1\r\nConnection: close\r\nContent-Length: 0\r\n\r\n".bytes());
+                try? conn.close();
                 continue;
             }
 
@@ -322,15 +326,21 @@ impl Engine {
 
             // Handle connection in spawn
             spawn {
-                let stream = stream;
+                let conn = conn;
                 let counter = counter;  // Capture object reference
+                let enable_keep_alive = enable_keep_alive;
+                let keep_alive_timeout = keep_alive_timeout;
 
                 defer {
-                    try? stream.close();
+                    try? conn.close();
                     counter.dec();  // Decrement when spawn exits
                 }
 
-                try? self.handle_single_request(stream);
+                if (enable_keep_alive) {
+                    try? self.handle_connection_keepalive_spawn(conn, keep_alive_timeout);
+                } else {
+                    try? self.handle_single_request(conn);
+                }
             }
         }
     }
@@ -355,6 +365,84 @@ impl Engine {
                     try? stream.write_all(response_data.bytes());
                     try? stream.flush();
                 }
+            }
+        }
+    }
+
+    /// Handle connection with Keep-Alive in spawn mode using TcpBufReader with timeout
+    /// Uses TcpBufReader.read_line_timeout() for efficient Keep-Alive waiting
+    fn handle_connection_keepalive_spawn(self, conn: TcpConnection, keep_alive_timeout: int) throws {
+        // Cast to internal type for TcpBufReader (they're the same underlying type)
+        let reader = TcpBufReader.new(conn as _TcpConnection);
+        let requests_handled = 0;
+        let max_requests = self.config.max_requests_per_connection;
+
+        loop {
+            // First request doesn't need timeout (connection just established)
+            // Subsequent requests wait with timeout for next request
+            let first_line: string?;
+            if (requests_handled == 0) {
+                first_line = try? reader.read_line();
+            } else {
+                first_line = try? reader.read_line_timeout(keep_alive_timeout);
+            }
+
+            if (first_line == nil) {
+                break;  // Timeout or connection closed
+            }
+
+            let first_line = first_line!;
+            if (first_line.trim().len() == 0) {
+                break;  // Empty request line, close connection
+            }
+
+            // Read remaining headers
+            let lines: [string] = [first_line];
+            loop {
+                let line_opt = try? reader.read_line();
+                if (let line = line_opt) {
+                    let trimmed = line.trim();
+                    if (trimmed.len() == 0) {
+                        lines.push("");
+                        break;  // End of headers
+                    }
+                    lines.push(line);
+                } else {
+                    break;
+                }
+            }
+
+            let raw_request = lines.join("\r\n");
+            if (raw_request.trim().len() == 0) {
+                break;
+            }
+
+            let request_opt = try? self.parse_request_or_error(raw_request);
+            if (request_opt == nil) {
+                break;
+            }
+
+            let request = request_opt!;
+            let keep_alive = self.should_keep_alive(request);
+
+            let route_match = self.router.find_match(request.method, request.path);
+
+            if (let matched_route = route_match) {
+                try? self.handle_spawn_execution_keepalive(reader.connection() as TcpConnection, request, matched_route, keep_alive);
+            } else {
+                let response = Response.not_found();
+                if (!keep_alive) {
+                    response.header("Connection", "close");
+                }
+                let response_data = response.build();
+                try? reader.connection().write_all(response_data.bytes());
+                try? reader.connection().flush();
+            }
+
+            requests_handled += 1;
+
+            if (!keep_alive || requests_handled >= max_requests) {
+                break;
             }
         }
     }
@@ -499,12 +587,15 @@ impl Engine {
                 let stream_result = try? listener.accept();
 
                 if (let stream = stream_result) {
-                    // P0: Check connection limit (simple counter, not thread-safe but acceptable for spawn)
+                    // Connection limiting - fast reject when at capacity
                     if (active_connections >= max_connections) {
-                        try? stream.write_all("HTTP/1.1 503 Service Unavailable\r\nRetry-After: 1\r\nConnection: close\r\n\r\n".bytes());
+                        try? stream.write_all("HTTP/1.1 503 Service Unavailable\r\nRetry-After: 1\r\nConnection: close\r\nContent-Length: 0\r\n\r\n".bytes());
                         try? stream.close();
                         continue;
                     }
+
+                    // Increment connection count
+                    active_connections += 1;
 
                     // Note: In worker pool mode, we handle connections sequentially in this spawn
                     // because worker pool tasks need to go through the main thread channel anyway.
@@ -518,6 +609,9 @@ impl Engine {
                     }
 
                     try? stream.close();
+
+                    // Decrement connection count after handling
+                    active_connections -= 1;
                 } else {
                     break;
                 }
