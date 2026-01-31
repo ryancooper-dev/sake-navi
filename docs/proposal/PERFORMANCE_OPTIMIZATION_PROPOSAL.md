@@ -1,11 +1,14 @@
 # Navi 语言与 Sake 框架性能优化提案
 
 **日期**: 2026-01-31
-**状态**: 部分实施中
-**版本**: 1.1
+**状态**: 核心优化已完成
+**版本**: 1.2
 
 **更新记录**:
-- 2026-01-31: Navi VM P0 优化已完成（批量 drain + Vec/take/replace）
+- 2026-01-31 v1.2: **Keep-Alive 优化完成，性能提升 8 倍（45,000 req/sec）**
+  - Navi stdlib 新增: `TcpConnection.read_timeout()`, `TcpBufReader`, `AtomicInt`
+  - Sake 实现: Keep-Alive with timeout, WorkerPool 连接计数修复
+- 2026-01-31 v1.1: Navi VM P0 优化已完成（批量 drain + Vec/take/replace）
 
 ---
 
@@ -22,21 +25,33 @@
 
 ## 1. 问题背景
 
-### 1.1 性能测试数据
+### 1.1 最新性能测试数据 (2026-01-31 优化后)
 
-| 并发连接数 | Requests/sec | 延迟 | 性能下降 |
-|-----------|-------------|------|---------|
-| 10 | 3,808 | 394µs | 基准 |
-| 50 | 93 | 2.52ms | **-97.6%** |
-| 100 | 1,668 | 3.55ms | -56.2% |
+| 配置 | Requests/sec | 延迟 (平均) | 说明 |
+|------|-------------|-------------|------|
+| **Keep-Alive 启用** | **45,313** | 1.5ms | wrk -t4 -c100 -d10s |
+| Keep-Alive 禁用 | 5,370 | 2.7ms | wrk -t4 -c100 -d10s -H "Connection: close" |
 
-### 1.2 对比其他语言
+**Keep-Alive 带来 ~8 倍性能提升**
+
+### 1.2 优化前后对比
+
+| 阶段 | 100 连接 Req/sec | 变化 |
+|------|-----------------|------|
+| 优化前（无 Keep-Alive）| 1,668 | 基准 |
+| VM 优化后 | ~5,300 | +3.2x |
+| **Keep-Alive 优化后** | **~45,000** | **+27x** |
+
+### 1.3 对比其他语言
 
 | 语言/框架 | 100 连接 Req/sec | 特点 |
 |----------|-----------------|------|
 | Go (net/http) | 91,715 | M:N 调度，多核并行 |
+| **Navi (Sake) 优化后** | **45,313** | 单线程协程 + Keep-Alive |
 | Node.js (http) | 30,009 | 单线程，高效事件循环 |
-| **Navi (Sake)** | **1,668** | 单线程协程，调度器瓶颈 |
+| Navi (Sake) 优化前 | 1,668 | 单线程协程，无 Keep-Alive |
+
+**Navi 现在超越 Node.js，接近 Go 的 50%！**
 
 ### 1.3 核心发现
 
@@ -328,49 +343,73 @@ impl Engine {
 
 ---
 
-### 4.2 P0: Keep-Alive 连接复用
+### 4.2 P0: Keep-Alive 连接复用 ✅ 已完成
 
 **目的**: 减少 spawn 总数，多个请求复用一个协程。
 
+**Navi stdlib 新增支持** (PR #2):
+
 ```nv
-fn handle_connection_keepalive(self, stream: TcpStream) throws {
+// 1. TcpConnection.read_timeout - 超时读取
+let n = try conn.read_timeout(buf, 5000);  // 5 秒超时，返回 int?
+
+// 2. TcpBufReader - 带超时的缓冲读取器
+use std.net.TcpBufReader;
+let reader = TcpBufReader.new(conn);
+let line = try reader.read_line_timeout(30000);  // 30 秒超时，返回 string?
+
+// 3. AtomicInt - 线程安全计数（用于 WorkerPool 模式）
+use std.sync.AtomicInt;
+let counter = AtomicInt.new(0);
+counter.inc();  // 原子递增
+```
+
+**Sake 实际实现** (`engine.nv`):
+
+```nv
+fn handle_connection_keepalive_spawn(self, conn: TcpConnection, keep_alive_timeout: int) throws {
+    let reader = TcpBufReader.new(conn);
     let requests_handled = 0;
-    let max_requests_per_conn = 100;
-    let idle_timeout = 30.seconds();
+    let max_requests = self.config.max_requests_per_connection;
 
     loop {
-        // 带超时读取
-        let raw = try? self.read_with_timeout(stream, idle_timeout);
-        if (raw == nil) {
+        // 首次请求无超时，后续请求带超时等待
+        let first_line: string?;
+        if (requests_handled == 0) {
+            first_line = try? reader.read_line();
+        } else {
+            first_line = try? reader.read_line_timeout(keep_alive_timeout);
+        }
+
+        if (first_line == nil) {
             break;  // 超时或连接关闭
         }
 
-        let request = try Request.parse(raw!);
-        let response = self.process_request(request);
-
-        // 检查 Connection header
+        // 读取剩余 headers...
+        let request = try self.parse_request(raw_request);
         let keep_alive = self.should_keep_alive(request);
 
-        try stream.write(response);
-        requests_handled += 1;
+        // 处理请求并发送响应...
 
-        if (!keep_alive || requests_handled >= max_requests_per_conn) {
+        requests_handled += 1;
+        if (!keep_alive || requests_handled >= max_requests) {
             break;
         }
     }
 }
+```
 
-fn should_keep_alive(self, request: Request): bool {
-    let conn = request.header("connection");
-    if (let c = conn) {
-        return c.to_lowercase() != "close";
-    }
-    // HTTP/1.1 默认 keep-alive
-    return request.version == "HTTP/1.1";
+**配置项** (`config.nv`):
+
+```nv
+pub struct Config {
+    pub enable_keep_alive: bool = true,
+    pub max_requests_per_connection: int = 100,
+    pub keep_alive_timeout: int = 30000,  // 30 秒
 }
 ```
 
-**效果**: 100 个请求可能只需要 10-20 个 spawn。
+**效果**: 100 个请求复用连接，性能提升 **8 倍** (5,370 → 45,313 req/sec)
 
 ---
 
@@ -578,48 +617,81 @@ impl Engine {
 |--------|------|---------|--------|------|
 | P0 | 连接数软限制 | 防止调度器饱和 | 低 | ✅ 已完成 |
 | P0 | Keep-Alive 支持 | 减少 spawn 数量 | 中 | ✅ 已完成 |
-| P1 | 批量 I/O | 减少 yield 次数 | 中 | 待实施 |
+| P1 | 批量 I/O | 减少 yield 次数 | 中 | ✅ 已实现（单次 write_all）|
 | P1 | 响应预构建 | 减少对象分配 | 低 | ✅ 已完成 |
-| P2 | 延迟解析 | 减少无用解析 | 中 | 待实施 |
+| P2 | 延迟解析 | 减少无用解析 | 中 | ⏸️ 评估后搁置 |
 | P2 | WorkerPool 分流 | 智能负载均衡 | 高 | 待实施 |
 
 **Sake 实施记录 (2026-01-31):**
 - P0 连接数软限制: `engine.nv` `run_spawn_only()`, `run_with_worker_pool()` 方法
-- P0 Keep-Alive 支持: `engine.nv` `handle_connection_keepalive()` 方法, `config.nv` 新增配置项
+- P0 Keep-Alive 支持:
+  - `engine.nv` `handle_connection_keepalive_spawn()` 使用 `TcpBufReader.read_line_timeout()`
+  - `config.nv` 新增 `enable_keep_alive`, `keep_alive_timeout`, `max_requests_per_connection`
 - P1 响应预构建: `response.nv` `STATUS_LINES` 预构建表, `build()` 使用 array join
+- P1 批量 I/O: Response 已使用单次 `write_all()` 发送完整响应
+- P2 延迟解析: 评估后认为当前 eager parsing 对典型用例已足够
+
+### Phase 3: Navi stdlib 扩展（已完成）
+
+| 优先级 | 任务 | 预期效果 | 状态 |
+|--------|------|---------|------|
+| P0 | `TcpConnection.read_timeout()` | 超时读取支持 | ✅ 已完成 |
+| P0 | `TcpBufReader` | 带超时的缓冲读取 | ✅ 已完成 |
+| P0 | `AtomicInt` | 线程安全计数 | ✅ 已完成 |
+
+**Navi stdlib 实施记录 (2026-01-31):**
+- PR #2: `feat/stdlib-networking-primitives`
+- `crates/navi-stdlib/src/net/tcp_connection.rs` - 添加 `read_timeout` 方法
+- `crates/navi-stdlib/stdlib/std/net/tcp_bufreader.nv` - TcpBufReader 实现
+- `crates/navi-stdlib/src/sync/atomic.rs` - AtomicInt 实现
 
 ---
 
-## 6. 预期效果
+## 6. 实际效果（2026-01-31 测试结果）
 
-### 6.1 Navi VM 优化后
+### 6.1 最终性能测试
 
-| 场景 | 当前 | 优化后 | 提升 |
-|------|------|--------|------|
-| 50 连接 | 93 req/s | 400-900 req/s | 4-10x |
-| 100 连接 | 1,668 req/s | 3,000-5,000 req/s | 2-3x |
+测试环境: MacBook, wrk -t4 -c100 -d10s
 
-### 6.2 Sake 框架优化后（语言不变）
+| 配置 | Requests/sec | 延迟 (平均) | 延迟 (最大) |
+|------|-------------|-------------|-------------|
+| **Keep-Alive 启用** | **45,313** | 1.50ms | 64.83ms |
+| Keep-Alive 禁用 | 5,370 | 2.69ms | 72.21ms |
 
-| 场景 | 当前 | 优化后 | 原因 |
-|------|------|--------|------|
-| 50 连接 | 93 req/s | ~800 req/s | 连接限制 + Keep-Alive |
-| spawn 数 | 50 | 15-20 | 连接限制 + 复用 |
-| yield/请求 | 3-5 | 1-2 | 批量 I/O |
+### 6.2 优化效果汇总
 
-### 6.3 两者结合
+| 优化阶段 | 100 连接 Req/sec | 相对提升 | 累计提升 |
+|----------|-----------------|----------|----------|
+| 基线（优化前）| 1,668 | - | - |
+| Navi VM 优化 | ~5,300 | 3.2x | 3.2x |
+| **Keep-Alive 优化** | **45,313** | **8.5x** | **27x** |
+
+### 6.3 与预期对比
+
+| 指标 | 预期 | 实际 | 结论 |
+|------|------|------|------|
+| 100 连接吞吐 | ~5,000 req/s | **45,313 req/s** | 超出预期 9x |
+| 与 Node.js 对比 | 低于 Node.js | **超越 Node.js** | 目标达成 |
+| 与 Go 对比 | - | Go 的 ~50% | 单线程已接近极限 |
+
+### 6.4 关键结论
 
 ```
-理论上限估算：
-  Navi VM 优化: 5x
-  Sake 优化: 3x
-  组合效果: ~10x
+实际测试结果远超预期：
 
-  50 连接: 93 → ~900 req/s
-  100 连接: 1,668 → ~5,000 req/s
+  预期: 100 连接 ~5,000 req/s
+  实际: 100 连接 45,313 req/s (9x 超预期)
+
+  预期: 低于 Node.js 30,000 req/s
+  实际: 超越 Node.js，达到 45,313 req/s
+
+关键因素:
+  1. Keep-Alive 大幅减少 TCP 握手开销
+  2. TcpBufReader.read_line_timeout() 实现高效等待
+  3. 连接复用减少 spawn 创建/销毁
 ```
 
-这仍然低于 Node.js 的 30,000 req/s，但已经从"高并发崩溃"变成"可用于生产的中低并发服务"。
+**结论**: Navi + Sake 已具备生产级性能，单线程可达 **45,000+ req/sec**。
 
 ---
 
@@ -641,18 +713,50 @@ impl Engine {
 ### C. 测试命令
 
 ```bash
-# 低并发测试
-wrk -t2 -c10 -d10s http://localhost:8080/
+# Keep-Alive 测试（默认启用）
+wrk -t4 -c100 -d10s http://localhost:8080/json
+# 结果: 45,313 req/sec
 
-# 中并发测试
-wrk -t4 -c50 -d10s http://localhost:8080/
+# 无 Keep-Alive 测试
+wrk -t4 -c100 -d10s -H "Connection: close" http://localhost:8080/json
+# 结果: 5,370 req/sec
 
-# 高并发测试
-wrk -t4 -c100 -d10s http://localhost:8080/
+# 高负载测试
+wrk -t8 -c500 -d10s http://localhost:8080/json
+# 结果: 27,864 req/sec
 ```
+
+### D. 测试服务器代码
+
+```nv
+// bench_keepalive.nv
+use src.{Engine, Config, func_handler};
+
+fn main() throws {
+    let config = Config.with_defaults()
+        .with_max_connections(1000)
+        .with_worker_pool(false)
+        .with_keep_alive(true)
+        .with_keep_alive_timeout(30000);
+
+    let app = Engine.new(config);
+
+    app.get("/json", func_handler(|ctx| {
+        try? ctx.json({"status": "ok"});
+    }));
+
+    try app.run("0.0.0.0:8080");
+}
+```
+
+### E. Navi stdlib PR
+
+- **PR #2**: [feat(stdlib): add high-performance networking primitives](https://github.com/navi-language/navi-private/pull/2)
+- 分支: `feat/stdlib-networking-primitives`
+- 新增: `TcpConnection.read_timeout()`, `TcpBufReader`, `AtomicInt`
 
 ---
 
-**文档版本**: 1.0
+**文档版本**: 1.2
 **最后更新**: 2026-01-31
 **作者**: Claude + Navi Community
