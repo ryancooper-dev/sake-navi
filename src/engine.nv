@@ -281,60 +281,19 @@ impl Engine {
     /// - Connection limiting: fast-reject when at max_connections
     /// - Keep-Alive: reuse connections for multiple requests
     fn run_spawn_only(self, listener: TcpListener) throws {
-        // P0: Connection counter for soft limiting
-        let active_connections = 0;
-        let conn_dec_ch = channel::<bool>();
-
         loop {
-            // Check for shutdown signal (non-blocking)
-            if (let ch = self.shutdown_ch) {
-                if (let signal_opt = try? ch.try_recv()) {
-                    if (let _ = signal_opt) {
-                        println("🍶 Sake server shutting down...");
-                        break;
-                    }
-                }
-            }
-
-            // P0: Drain completed connection notifications (non-blocking)
-            while (let _ = try? conn_dec_ch.try_recv()) {
-                active_connections -= 1;
-            }
-
             // Accept connection (blocking)
-            let stream_result = try? listener.accept();
+            let stream = try listener.accept();
 
-            if (let stream = stream_result) {
-                // P0: Check connection limit
-                if (active_connections >= self.config.max_connections) {
-                    // Fast reject - don't enter scheduler
-                    try? stream.write_all("HTTP/1.1 503 Service Unavailable\r\nRetry-After: 1\r\nConnection: close\r\n\r\n".bytes());
+            // Handle connection in spawn
+            spawn {
+                let stream = stream;
+
+                defer {
                     try? stream.close();
-                    continue;
                 }
 
-                active_connections += 1;
-
-                // Handle connection in spawn
-                spawn {
-                    let stream = stream;
-                    let conn_dec_ch = conn_dec_ch;
-
-                    defer {
-                        try? stream.close();
-                        // P0: Notify connection closed
-                        try? conn_dec_ch.send(true);
-                    }
-
-                    // P0: Keep-Alive support - handle multiple requests per connection
-                    if (self.config.enable_keep_alive) {
-                        try? self.handle_connection_keepalive(stream);
-                    } else {
-                        try? self.handle_single_request(stream);
-                    }
-                }
-            } else {
-                break;
+                try? self.handle_single_request(stream);
             }
         }
     }
