@@ -33,6 +33,31 @@ let STATUS_TEXTS: <int, string> = {
     503: "Service Unavailable",
 };
 
+// ============================================
+// P1 Optimization: Pre-built status lines
+// ============================================
+
+/// Pre-built HTTP status lines for common status codes
+/// Avoids string formatting overhead on hot path
+let STATUS_LINES: <int, string> = {
+    200: "HTTP/1.1 200 OK\r\n",
+    201: "HTTP/1.1 201 Created\r\n",
+    204: "HTTP/1.1 204 No Content\r\n",
+    301: "HTTP/1.1 301 Moved Permanently\r\n",
+    302: "HTTP/1.1 302 Found\r\n",
+    304: "HTTP/1.1 304 Not Modified\r\n",
+    400: "HTTP/1.1 400 Bad Request\r\n",
+    401: "HTTP/1.1 401 Unauthorized\r\n",
+    403: "HTTP/1.1 403 Forbidden\r\n",
+    404: "HTTP/1.1 404 Not Found\r\n",
+    405: "HTTP/1.1 405 Method Not Allowed\r\n",
+    409: "HTTP/1.1 409 Conflict\r\n",
+    422: "HTTP/1.1 422 Unprocessable Entity\r\n",
+    500: "HTTP/1.1 500 Internal Server Error\r\n",
+    502: "HTTP/1.1 502 Bad Gateway\r\n",
+    503: "HTTP/1.1 503 Service Unavailable\r\n",
+};
+
 /// HTTP Response struct
 struct Response {
     /// HTTP status code (default: 200)
@@ -111,37 +136,46 @@ impl Response {
     }
     
     /// Build the complete HTTP response string
-    /// 
+    ///
+    /// P1 Optimization: Uses pre-built status lines and array join
+    /// to reduce string concatenation overhead.
+    ///
     /// # Returns
     /// Full HTTP response ready to send over the wire
     pub fn build(self): string {
-        let status_text = STATUS_TEXTS.get(self.status_code) || "Unknown";
-        
-        // Start with status line
-        let result = `HTTP/1.1 ${self.status_code} ${status_text}\r\n`;
-        
+        // P1: Use pre-built status line if available
+        let status_line = STATUS_LINES.get(self.status_code);
+        if (status_line == nil) {
+            let status_text = STATUS_TEXTS.get(self.status_code) || "Unknown";
+            status_line = `HTTP/1.1 ${self.status_code} ${status_text}\r\n`;
+        }
+
         // Add Content-Length if not set
         if (self.headers.get("Content-Length") == nil) {
             self.headers["Content-Length"] = self.body.len().to_string();
         }
-        
+
         // Add default headers if not set
         if (self.headers.get("Connection") == nil) {
             self.headers["Connection"] = "close";
         }
-        
+
+        // P1: Build using array join instead of repeated concatenation
+        let parts: [string] = [];
+        parts.push(status_line!);
+
         // Add headers
         for (let name, value in self.headers) {
-            result = result + `${name}: ${value}\r\n`;
+            parts.push(`${name}: ${value}\r\n`);
         }
-        
+
         // Empty line before body
-        result = result + "\r\n";
-        
+        parts.push("\r\n");
+
         // Add body
-        result = result + self.body;
-        
-        return result;
+        parts.push(self.body);
+
+        return parts.join("");
     }
     
     /// Send response to a writer

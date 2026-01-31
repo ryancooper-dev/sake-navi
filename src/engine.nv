@@ -276,7 +276,15 @@ impl Engine {
 
     /// Run server in spawn-only mode (no WorkerPool)
     /// Main thread accepts connections, each handled in spawn
+    ///
+    /// P0 Optimizations:
+    /// - Connection limiting: fast-reject when at max_connections
+    /// - Keep-Alive: reuse connections for multiple requests
     fn run_spawn_only(self, listener: TcpListener) throws {
+        // P0: Connection counter for soft limiting
+        let active_connections = 0;
+        let conn_dec_ch = channel::<bool>();
+
         loop {
             // Check for shutdown signal (non-blocking)
             if (let ch = self.shutdown_ch) {
@@ -288,39 +296,41 @@ impl Engine {
                 }
             }
 
+            // P0: Drain completed connection notifications (non-blocking)
+            while (let _ = try? conn_dec_ch.try_recv()) {
+                active_connections -= 1;
+            }
+
             // Accept connection (blocking)
             let stream_result = try? listener.accept();
 
             if (let stream = stream_result) {
-                // Handle each connection in spawn
+                // P0: Check connection limit
+                if (active_connections >= self.config.max_connections) {
+                    // Fast reject - don't enter scheduler
+                    try? stream.write_all("HTTP/1.1 503 Service Unavailable\r\nRetry-After: 1\r\nConnection: close\r\n\r\n".bytes());
+                    try? stream.close();
+                    continue;
+                }
+
+                active_connections += 1;
+
+                // Handle connection in spawn
                 spawn {
                     let stream = stream;
+                    let conn_dec_ch = conn_dec_ch;
 
                     defer {
                         try? stream.close();
+                        // P0: Notify connection closed
+                        try? conn_dec_ch.send(true);
                     }
 
-                    // Read and handle request
-                    let raw_request_opt = try? self.read_http_request(stream);
-                    if (let raw_request = raw_request_opt) {
-                        if (raw_request.trim().len() == 0) {
-                            return;
-                        }
-
-                        let request_opt = try? self.parse_request_or_error(raw_request);
-                        if (let request = request_opt) {
-                            let route_match = self.router.find_match(request.method, request.path);
-
-                            if (let matched_route = route_match) {
-                                try? self.handle_spawn_execution(stream, request, matched_route);
-                            } else {
-                                let response = Response.not_found();
-                                let response_data = response.build();
-                                let bytes = response_data.bytes();
-                                try? stream.write_all(bytes);
-                                try? stream.flush();
-                            }
-                        }
+                    // P0: Keep-Alive support - handle multiple requests per connection
+                    if (self.config.enable_keep_alive) {
+                        try? self.handle_connection_keepalive(stream);
+                    } else {
+                        try? self.handle_single_request(stream);
                     }
                 }
             } else {
@@ -329,21 +339,189 @@ impl Engine {
         }
     }
 
+    /// Handle a single request on a connection (no keep-alive)
+    fn handle_single_request(self, stream: Connection) throws {
+        let raw_request_opt = try? self.read_http_request(stream);
+        if (let raw_request = raw_request_opt) {
+            if (raw_request.trim().len() == 0) {
+                return;
+            }
+
+            let request_opt = try? self.parse_request_or_error(raw_request);
+            if (let request = request_opt) {
+                let route_match = self.router.find_match(request.method, request.path);
+
+                if (let matched_route = route_match) {
+                    try? self.handle_spawn_execution(stream, request, matched_route);
+                } else {
+                    let response = Response.not_found();
+                    let response_data = response.build();
+                    try? stream.write_all(response_data.bytes());
+                    try? stream.flush();
+                }
+            }
+        }
+    }
+
+    /// P0: Handle connection with Keep-Alive support
+    /// Reuses connection for multiple requests, reducing spawn count
+    fn handle_connection_keepalive(self, stream: Connection) throws {
+        let requests_handled = 0;
+        let max_requests = self.config.max_requests_per_connection;
+
+        loop {
+            // Read HTTP request
+            let raw_request_opt = try? self.read_http_request(stream);
+            if (raw_request_opt == nil) {
+                break;  // Connection closed or timeout
+            }
+
+            let raw_request = raw_request_opt!;
+            if (raw_request.trim().len() == 0) {
+                break;  // Empty request, close connection
+            }
+
+            let request_opt = try? self.parse_request_or_error(raw_request);
+            if (request_opt == nil) {
+                break;  // Parse error, close connection
+            }
+
+            let request = request_opt!;
+
+            // Check Connection header for keep-alive
+            let keep_alive = self.should_keep_alive(request);
+
+            // Find and execute route
+            let route_match = self.router.find_match(request.method, request.path);
+
+            if (let matched_route = route_match) {
+                try? self.handle_spawn_execution_keepalive(stream, request, matched_route, keep_alive);
+            } else {
+                let response = Response.not_found();
+                if (!keep_alive) {
+                    response.header("Connection", "close");
+                }
+                let response_data = response.build();
+                try? stream.write_all(response_data.bytes());
+                try? stream.flush();
+            }
+
+            requests_handled += 1;
+
+            // Check if we should close connection
+            if (!keep_alive || requests_handled >= max_requests) {
+                break;
+            }
+        }
+    }
+
+    /// Check if connection should be kept alive based on HTTP headers
+    fn should_keep_alive(self, request: Request): bool {
+        // Check Connection header
+        let conn_header = request.header("connection");
+        if (let conn = conn_header) {
+            let lower = conn.to_lowercase();
+            if (lower == "close") {
+                return false;
+            }
+            if (lower == "keep-alive") {
+                return true;
+            }
+        }
+
+        // HTTP/1.1 defaults to keep-alive
+        // HTTP/1.0 defaults to close
+        return request.version == "HTTP/1.1";
+    }
+
+    /// Handle spawn execution with keep-alive support
+    fn handle_spawn_execution_keepalive(
+        self,
+        stream: Connection,
+        request: Request,
+        route_match: RouteMatch,
+        keep_alive: bool
+    ) throws {
+        // Track metrics
+        let req_id = self.metrics.request_start();
+        defer {
+            self.metrics.request_end(req_id);
+        }
+
+        // Build handler chain
+        let handlers: [Handler] = [];
+
+        for (let mw in self.middleware) {
+            handlers.push(mw);
+        }
+
+        for (let mw in route_match.route.middleware) {
+            handlers.push(mw);
+        }
+
+        handlers.push(route_match.route.handler);
+
+        // Create context
+        let ctx = Context.with_handlers(request, handlers, route_match.params);
+
+        // Execute handler chain
+        try ctx.next();
+
+        // Add Connection header based on keep-alive status
+        if (!keep_alive) {
+            ctx.response.header("Connection", "close");
+        } else {
+            ctx.response.header("Connection", "keep-alive");
+        }
+
+        // Send response
+        let response_data = ctx.response.build();
+        try stream.write_all(response_data.bytes());
+        try stream.flush();
+    }
+
     /// Run server with WorkerPool using channel-based coordination
     /// Accept loop in spawn, main thread processes WorkerPool tasks
+    ///
+    /// P0 Optimizations:
+    /// - Connection limiting: fast-reject when at max_connections
+    /// - Keep-Alive: reuse connections for multiple requests
     fn run_with_worker_pool(self, listener: TcpListener) throws {
+        // Capture config values for spawn
+        let max_connections = self.config.max_connections;
+        let enable_keep_alive = self.config.enable_keep_alive;
+
         // Move accept to spawn so main thread can process WorkerPool tasks
         spawn {
             let listener = listener;
             let worker_task_ch = self.worker_task_ch;
+            let active_connections = 0;
+            let max_connections = max_connections;
+            let enable_keep_alive = enable_keep_alive;
 
             loop {
                 let stream_result = try? listener.accept();
 
                 if (let stream = stream_result) {
-                    // Handle connection directly in first-level spawn
-                    // (self is accessible here!)
-                    try? self.handle_connection_worker_mode(stream, worker_task_ch);
+                    // P0: Check connection limit (simple counter, not thread-safe but acceptable for spawn)
+                    if (active_connections >= max_connections) {
+                        try? stream.write_all("HTTP/1.1 503 Service Unavailable\r\nRetry-After: 1\r\nConnection: close\r\n\r\n".bytes());
+                        try? stream.close();
+                        continue;
+                    }
+
+                    // Note: In worker pool mode, we handle connections sequentially in this spawn
+                    // because worker pool tasks need to go through the main thread channel anyway.
+                    // This is different from spawn-only mode where each connection gets its own spawn.
+
+                    // Handle connection directly (no nested spawn needed)
+                    if (enable_keep_alive) {
+                        try? self.handle_connection_keepalive_worker_mode(stream, worker_task_ch);
+                    } else {
+                        try? self.handle_connection_worker_mode(stream, worker_task_ch);
+                    }
+
+                    try? stream.close();
                 } else {
                     break;
                 }
@@ -376,6 +554,121 @@ impl Engine {
             } else {
                 break;
             }
+        }
+    }
+
+    /// P0: Handle connection with Keep-Alive in worker mode
+    fn handle_connection_keepalive_worker_mode(
+        self,
+        stream: Connection,
+        worker_task_ch: channel<WorkerTask>?
+    ) throws {
+        let requests_handled = 0;
+        let max_requests = self.config.max_requests_per_connection;
+
+        loop {
+            let raw_request_opt = try? self.read_http_request(stream);
+            if (raw_request_opt == nil) {
+                break;
+            }
+
+            let raw_request = raw_request_opt!;
+            if (raw_request.trim().len() == 0) {
+                break;
+            }
+
+            let request_opt = try? self.parse_request_or_error(raw_request);
+            if (request_opt == nil) {
+                break;
+            }
+
+            let request = request_opt!;
+            let keep_alive = self.should_keep_alive(request);
+
+            let route_match = self.router.find_match(request.method, request.path);
+
+            if (let matched_route = route_match) {
+                let use_worker = matched_route.route.worker_mode == WorkerMode.Worker;
+
+                if (use_worker) {
+                    try? self.handle_worker_with_channel_keepalive(
+                        stream, request, matched_route, worker_task_ch, keep_alive
+                    );
+                } else {
+                    try? self.handle_spawn_execution_keepalive(stream, request, matched_route, keep_alive);
+                }
+            } else {
+                let response = Response.not_found();
+                if (!keep_alive) {
+                    response.header("Connection", "close");
+                }
+                let response_data = response.build();
+                try? stream.write_all(response_data.bytes());
+                try? stream.flush();
+            }
+
+            requests_handled += 1;
+
+            if (!keep_alive || requests_handled >= max_requests) {
+                break;
+            }
+        }
+    }
+
+    /// Handle WorkerPool with channel and keep-alive support
+    fn handle_worker_with_channel_keepalive(
+        self,
+        stream: Connection,
+        request: Request,
+        route_match: RouteMatch,
+        worker_task_ch: channel<WorkerTask>?,
+        keep_alive: bool
+    ) throws {
+        let req_id = self.metrics.request_start();
+        defer {
+            self.metrics.request_end(req_id);
+        }
+
+        let ctx = Context.with_handlers(request, [], route_match.params);
+        ctx.in_worker = true;
+        ctx.worker_size = self.config.effective_worker_pool_size();
+        ctx.handler_id = route_match.route.handler_id;
+
+        let worker_ctx = ctx.to_worker_context();
+        for (let name, data in route_match.route.frozen_bindings) {
+            worker_ctx.frozen_data[name] = data;
+        }
+        let ctx_json = try worker_ctx.to_json();
+
+        let response_ch = channel::<WorkerResponse>();
+
+        if (let task_ch = worker_task_ch) {
+            let task = WorkerTask.new(ctx_json, route_match.route.handler_id, response_ch);
+            try task_ch.send(task);
+
+            let worker_response = try response_ch.recv();
+
+            let response = Response.new();
+            response.status(worker_response.status);
+
+            for (let name, value in worker_response.headers) {
+                response.header(name, value);
+            }
+
+            // Add Connection header
+            if (!keep_alive) {
+                response.header("Connection", "close");
+            } else {
+                response.header("Connection", "keep-alive");
+            }
+
+            response.write(worker_response.body);
+
+            let response_data = response.build();
+            try stream.write_all(response_data.bytes());
+            try stream.flush();
+        } else {
+            throw "Worker task channel not initialized";
         }
     }
 

@@ -32,6 +32,23 @@ pub struct Config {
     /// Set to 0 for no timeout
     /// Default: 30000 (30 seconds)
     pub request_timeout: int = 30000,
+
+    // ============================================
+    // P0 Optimization: Keep-Alive Support
+    // ============================================
+
+    /// Enable HTTP Keep-Alive connection reuse
+    /// Default: true
+    pub enable_keep_alive: bool = true,
+
+    /// Maximum requests per keep-alive connection
+    /// Default: 100
+    pub max_requests_per_connection: int = 100,
+
+    /// Keep-alive idle timeout in milliseconds
+    /// Connection closed if no request within this time
+    /// Default: 30000 (30 seconds)
+    pub keep_alive_timeout: int = 30000,
 }
 
 impl Config {
@@ -92,6 +109,42 @@ impl Config {
     /// Self for chaining
     pub fn with_request_timeout(self, timeout_ms: int): Config {
         self.request_timeout = timeout_ms;
+        return self;
+    }
+
+    /// Enable/disable HTTP Keep-Alive
+    ///
+    /// # Arguments
+    /// * `enabled` - Whether to enable keep-alive
+    ///
+    /// # Returns
+    /// Self for chaining
+    pub fn with_keep_alive(self, enabled: bool): Config {
+        self.enable_keep_alive = enabled;
+        return self;
+    }
+
+    /// Set maximum requests per keep-alive connection
+    ///
+    /// # Arguments
+    /// * `max` - Maximum requests per connection
+    ///
+    /// # Returns
+    /// Self for chaining
+    pub fn with_max_requests_per_connection(self, max: int): Config {
+        self.max_requests_per_connection = max;
+        return self;
+    }
+
+    /// Set keep-alive idle timeout in milliseconds
+    ///
+    /// # Arguments
+    /// * `timeout_ms` - Timeout in milliseconds
+    ///
+    /// # Returns
+    /// Self for chaining
+    pub fn with_keep_alive_timeout(self, timeout_ms: int): Config {
+        self.keep_alive_timeout = timeout_ms;
         return self;
     }
 
