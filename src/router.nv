@@ -3,6 +3,9 @@
 /// Router handles route registration and matching with support for
 /// path parameters (e.g., /users/:id) and multiple HTTP methods.
 
+use std.json;
+use std.sync.freeze;
+
 // Note: context is in same module
 
 /// Worker execution mode for routes
@@ -34,6 +37,10 @@ pub struct Route {
     /// Handler ID for registered worker handlers
     /// -1 means no registered handler (use default or closure)
     pub handler_id: int = -1,
+
+    /// Frozen data bindings for worker routes
+    /// Maps name to JSON-serialized Frozen bytes for cross-thread data passing
+    pub frozen_bindings: <string, string> = {:},
 }
 
 /// Route matching result
@@ -223,50 +230,116 @@ impl RouteBuilder {
     /// Mark this route to execute in WorkerPool (parallel, multi-threaded)
     ///
     /// Use this for CPU-intensive routes to leverage multiple CPU cores.
+    /// Combine with .with_handler() to set the worker handler.
     ///
     /// # Returns
     /// Self for chaining
     ///
     /// # Example
     /// ```nv
-    /// app.get("/compute/:n", |ctx| {
-    ///     let n = ctx.param("n").parse::<int>();
-    ///     let result = expensive_computation(n);
-    ///     ctx.json({"result": result});
-    /// }).worker();
+    /// fn my_handler(ctx: WorkerContext): WorkerResponse throws {
+    ///     return WorkerResponse.json(200, `{"status": "ok"}`);
+    /// }
+    ///
+    /// app.get("/api", |ctx| {})
+    ///     .worker()
+    ///     .with_handler(my_handler);
     /// ```
     pub fn worker(self): RouteBuilder {
         self.router.routes[self.route_index].worker_mode = WorkerMode.Worker;
         return self;
     }
 
-    /// Set the handler ID for this route
+    /// Set the worker handler for this route (recommended)
     ///
-    /// When a route is marked as .worker() and has a handler_id set,
-    /// the WorkerPool will call the registered handler from REGISTRY
-    /// instead of using the closure.
+    /// Automatically registers the handler with REGISTRY and sets the handler_id.
+    /// This is the preferred way to set worker handlers - no need to manually
+    /// call REGISTRY.register().
     ///
     /// # Arguments
-    /// * `id` - Handler ID returned from REGISTRY.register()
+    /// * `handler` - Pure function handler for worker execution
     ///
     /// # Returns
     /// Self for chaining
     ///
     /// # Example
     /// ```nv
-    /// fn compute_handler(ctx: WorkerContext): WorkerResponse throws {
-    ///     let n = ctx.query.get("n")?.parse::<int>() || 10;
-    ///     return WorkerResponse.json(200, `{"result": ${fibonacci(n)}}`);
+    /// fn my_handler(ctx: WorkerContext): WorkerResponse throws {
+    ///     let name = ctx.query.get("name") || "World";
+    ///     return WorkerResponse.json(200, `{"message": "Hello, ${name}!"}`);
     /// }
     ///
-    /// let handler_id = REGISTRY.register(compute_handler);
-    ///
-    /// app.get("/compute", |ctx| {})
+    /// app.get("/hello", |ctx| {})
     ///     .worker()
-    ///     .with_handler_id(handler_id);
+    ///     .with_handler(my_handler)
+    ///     .with_frozen("config", config);
     /// ```
+    pub fn with_handler(self, handler: |(WorkerContext): WorkerResponse throws|): RouteBuilder {
+        let handler_id = REGISTRY.register(handler);
+        self.router.routes[self.route_index].handler_id = handler_id;
+        return self;
+    }
+
+    /// Set the handler ID for this route (advanced)
+    ///
+    /// Use with_handler() instead for simpler code.
+    /// This method is for cases where you need to manage handler IDs manually.
+    ///
+    /// # Arguments
+    /// * `id` - Handler ID returned from REGISTRY.register()
+    ///
+    /// # Returns
+    /// Self for chaining
     pub fn with_handler_id(self, id: int): RouteBuilder {
         self.router.routes[self.route_index].handler_id = id;
+        return self;
+    }
+
+    /// Attach frozen data to this route for worker thread access
+    ///
+    /// When a route is marked as .worker(), the frozen data will be
+    /// serialized and sent to worker threads where it can be retrieved
+    /// using ctx.frozen::<T>(name).
+    ///
+    /// This enables type-safe cross-thread data sharing for immutable
+    /// configuration, lookup tables, or other data that workers need.
+    ///
+    /// # Arguments
+    /// * `name` - Name to access the frozen data in handler
+    /// * `frozen` - Frozen value to pass to worker
+    ///
+    /// # Returns
+    /// Self for chaining
+    ///
+    /// # Errors
+    /// Throws if JSON serialization fails
+    ///
+    /// # Example
+    /// ```nv
+    /// use std.sync.freeze;
+    ///
+    /// struct Config {
+    ///     timeout: int,
+    ///     max_retries: int,
+    /// }
+    ///
+    /// fn my_handler(ctx: WorkerContext): WorkerResponse throws {
+    ///     let config = try ctx.frozen::<Config>("config");
+    ///     let value = try config.get();
+    ///     return WorkerResponse.json(200, `{"timeout": ${value.timeout}}`);
+    /// }
+    ///
+    /// let config = try freeze(Config { timeout: 30, max_retries: 3 });
+    ///
+    /// // Simple API - no explicit REGISTRY.register() needed
+    /// app.get("/api", |ctx| {})
+    ///     .worker()
+    ///     .with_handler(my_handler)
+    ///     .with_frozen("config", config);
+    /// ```
+    pub fn with_frozen<T>(self, name: string, frozen: Frozen<T>): RouteBuilder throws {
+        let data = try json.to_string(frozen);
+        self.router.routes[self.route_index].frozen_bindings[name] = data;
         return self;
     }
 
@@ -676,3 +749,92 @@ test "router group nested groups" {
 // test "router group all http methods" { ... }
 // test "route level middleware" { ... }
 // test "route level middleware with worker mode" { ... }
+
+// ============================================
+// Test structs for frozen data tests
+// ============================================
+
+struct TestConfig {
+    timeout: int,
+    name: string,
+}
+
+// ============================================
+// with_frozen() tests
+// ============================================
+
+test "with_frozen stores data in route" {
+    let router = Router.new();
+
+    let config = try! freeze(TestConfig { timeout: 30, name: "test" });
+
+    let builder = router.add_route("GET", "/api", func_handler(|ctx| { ctx.string("OK"); }));
+    try! builder.worker().with_frozen("config", config);
+
+    assert_eq router.routes.len(), 1;
+    assert router.routes[0].frozen_bindings.len() > 0;
+    assert router.routes[0].frozen_bindings.get("config") != nil;
+}
+
+test "with_frozen multiple values" {
+    let router = Router.new();
+
+    let config1 = try! freeze(TestConfig { timeout: 10, name: "first" });
+    let config2 = try! freeze(TestConfig { timeout: 20, name: "second" });
+
+    let builder = router.add_route("GET", "/api", func_handler(|ctx| { ctx.string("OK"); }));
+    try! builder.worker()
+        .with_frozen("primary", config1)
+        .with_frozen("secondary", config2);
+
+    assert_eq router.routes[0].frozen_bindings.len(), 2;
+    assert router.routes[0].frozen_bindings.get("primary") != nil;
+    assert router.routes[0].frozen_bindings.get("secondary") != nil;
+}
+
+test "with_frozen basic types" {
+    let router = Router.new();
+
+    let num = try! freeze(42);
+    let text = try! freeze("hello");
+
+    let builder = router.add_route("GET", "/api", func_handler(|ctx| { ctx.string("OK"); }));
+    try! builder.worker()
+        .with_frozen("number", num)
+        .with_frozen("text", text);
+
+    assert_eq router.routes[0].frozen_bindings.len(), 2;
+}
+
+// Test handler for with_handler test
+fn test_worker_handler(ctx: WorkerContext): WorkerResponse throws {
+    return WorkerResponse.text(200, "test");
+}
+
+test "with_handler auto registers handler" {
+    let router = Router.new();
+
+    let initial_count = REGISTRY.len();
+
+    let builder = router.add_route("GET", "/api", func_handler(|ctx| { ctx.string("OK"); }));
+    builder.worker().with_handler(test_worker_handler);
+
+    // Handler should be auto-registered
+    assert_eq REGISTRY.len(), initial_count + 1;
+    // Route should have handler_id set
+    assert router.routes[0].handler_id >= 0;
+}
+
+test "with_handler and with_frozen together" {
+    let router = Router.new();
+
+    let config = try! freeze(TestConfig { timeout: 30, name: "test" });
+
+    let builder = router.add_route("GET", "/api", func_handler(|ctx| { ctx.string("OK"); }));
+    try! builder.worker()
+        .with_handler(test_worker_handler)
+        .with_frozen("config", config);
+
+    assert router.routes[0].handler_id >= 0;
+    assert_eq router.routes[0].frozen_bindings.len(), 1;
+}

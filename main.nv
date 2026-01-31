@@ -2,9 +2,22 @@
 ///
 /// A high-performance, Gin-inspired web framework for Navi
 /// with built-in concurrency support.
+///
+/// Features:
+/// - Multi-threaded WorkerPool for CPU-intensive handlers
+/// - Pure function handlers registered with REGISTRY
+/// - Frozen<T> for type-safe cross-thread data sharing via with_frozen()
 
 fn main() {
     println("Sake Web Framework - Use as a library");
+    println("");
+    println("Features:");
+    println("  - Multi-threaded WorkerPool for CPU-intensive handlers");
+    println("  - Pure function handlers registered with REGISTRY");
+    println("  - Frozen<T> for type-safe cross-thread data sharing");
+    println("");
     println("Run tests with: navi test src/");
     println("See examples/ for usage examples");
+    println("  - examples/worker_pure_function.nv - WorkerPool with Frozen<T>");
+    println("  - examples/capabilities/test_capabilities.nv - Capability tests");
 }

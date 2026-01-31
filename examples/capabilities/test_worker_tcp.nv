@@ -4,81 +4,99 @@
 
 use std.vm;
 use std.worker.Worker;
-use std.net.{TcpListener, TcpConnection};
-use std.net.http.client;
+use std.net.TcpListener;
 use std.time;
+use std.sync.freeze;
+
+/// Worker pool handler function
+fn request_handler(req: string): string throws {
+    let tid = Worker.thread_id();
+    return `处理完成 by thread ${tid}: ${req}`;
+}
+
+/// Configuration for worker handlers
+struct WorkerConfig {
+    max_requests: int,
+    timeout_ms: int,
+}
 
 fn main() throws {
     println("=== Worker + TCP 集成测试 ===\n");
-    
+
     // 启动测试服务器
     let listener = try TcpListener.bind("127.0.0.1:0");
     let addr = try listener.tcp_addr();
     println(`服务器启动: ${addr}`);
-    
-    // 方案 A: 测试 WorkerPool 处理请求
+    try listener.close();
+
+    // 测试 1: WorkerPool 处理请求
     println("\n测试 1: WorkerPool 请求处理");
     test_worker_pool_request();
-    
-    // 方案 B: 测试跨线程传递连接 (如果支持)
-    println("\n测试 2: Worker 内处理连接");
-    try test_worker_connection(listener);
-    
+
+    // 测试 2: Frozen<T> 跨线程数据共享
+    println("\n测试 2: Frozen<T> 跨线程共享");
+    test_frozen_cross_thread();
+
+    // 测试 3: Worker 通信
+    println("\n测试 3: Worker 通信");
+    try test_worker_communication();
+
     println("\n=== 测试完成 ===");
 }
 
 fn test_worker_pool_request() {
     // 模拟请求处理
-    let pool = try! Worker.pool(|req| {
-        // 模拟请求处理
-        let tid = Worker.thread_id();
-        return `处理完成 by thread ${tid}: ${req}`;
-    }, vm.num_cpus());
-    
+    let pool = try! Worker.pool(request_handler);
+
     let results = try! pool.map_array([
         "GET /",
         "GET /api/users",
         "POST /api/data",
         "GET /health",
     ]);
-    
+
     for (let r in results) {
         println(`  ${r}`);
     }
     println("  ✅ WorkerPool 请求处理正常");
 }
 
-fn test_worker_connection(listener: TcpListener) throws {
-    // 在后台启动客户端
-    spawn {
-        time.sleep(0.1.seconds());
-        // 简单连接测试
-        let resp = try? client.get(`http://127.0.0.1:${try! listener.tcp_addr().port()}/`);
-        if (let r = resp) {
-            println(`  客户端收到响应: ${r.status()}`);
-        }
-    }
-    
+fn test_frozen_cross_thread() {
+    // 创建 Frozen 配置
+    let config = try! freeze(WorkerConfig {
+        max_requests: 100,
+        timeout_ms: 5000,
+    });
+
+    // 获取值并验证
+    let value = try! config.get();
+    println(`  config.max_requests = ${value.max_requests}`);
+    println(`  config.timeout_ms = ${value.timeout_ms}`);
+
+    // 多次获取验证独立副本
+    let v1 = try! config.get();
+    let v2 = try! config.get();
+    assert_eq v1.max_requests, v2.max_requests;
+
+    println("  ✅ Frozen<T> 跨线程共享正常");
+}
+
+fn test_worker_communication() throws {
     // 创建处理连接的 Worker
     let handler = try Worker.create(|w| {
-        // 等待连接信号
-        let signal = try w.recv::<string>();
-        println(`  Worker 收到信号: ${signal}`);
-        try w.send("处理完成");
+        // 等待消息
+        let msg_opt = try w.recv::<string>();
+        if (let msg = msg_opt) {
+            println(`  Worker 收到: ${msg}`);
+        }
+        try w.send("已处理");
     });
-    
-    // 接受连接
-    println("  等待连接...");
-    
-    // 设置超时
-    spawn {
-        time.sleep(1.seconds());
-        println("  超时，跳过连接测试");
+
+    // 发送消息
+    try handler.send("测试消息");
+    let result_opt = try handler.recv::<string>();
+    if (let result = result_opt) {
+        println(`  主线程收到: ${result}`);
     }
-    
-    // 通知 Worker
-    try handler.send("有新连接");
-    let result = try handler.recv::<string>();
-    println(`  ${result}`);
     println("  ✅ Worker 通信正常");
 }

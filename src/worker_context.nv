@@ -5,6 +5,7 @@
 /// the essential request data without closures or non-serializable types.
 
 use std.json;
+use std.sync.freeze;
 
 /// Serializable request context for worker threads
 pub struct WorkerContext {
@@ -29,6 +30,10 @@ pub struct WorkerContext {
     /// Handler ID for registered worker handlers
     /// This is used by REGISTRY.call() to invoke the correct handler
     pub handler_id: int = -1,
+
+    /// Frozen data bindings (name -> JSON-serialized Frozen bytes)
+    /// Used to pass immutable data from main thread to worker threads
+    pub frozen_data: <string, string> = {:},
 }
 
 impl WorkerContext {
@@ -49,6 +54,7 @@ impl WorkerContext {
             params,
             body,
             handler_id: -1,
+            frozen_data: {:},
         };
     }
 
@@ -70,7 +76,40 @@ impl WorkerContext {
             params,
             body,
             handler_id,
+            frozen_data: {:},
         };
+    }
+
+    /// Get a frozen value by name
+    ///
+    /// Retrieves a Frozen<T> value that was attached to the route
+    /// via RouteBuilder.with_frozen(). The type T must match the
+    /// type used when the frozen value was created.
+    ///
+    /// # Arguments
+    /// * `name` - Name of the frozen value (as specified in with_frozen())
+    ///
+    /// # Returns
+    /// The Frozen<T> value
+    ///
+    /// # Errors
+    /// Throws if the name is not found or deserialization fails
+    ///
+    /// # Example
+    /// ```nv
+    /// fn my_handler(ctx: WorkerContext): WorkerResponse throws {
+    ///     let config = try ctx.frozen::<Config>("config");
+    ///     let value = try config.get();
+    ///     return WorkerResponse.json(200, `{"timeout": ${value.timeout}}`);
+    /// }
+    /// ```
+    pub fn frozen<T>(self, name: string): Frozen<T> throws {
+        let data = self.frozen_data.get(name);
+        if (data == nil) {
+            throw `Frozen data not found: ${name}`;
+        }
+        // Deserialize the JSON-encoded Frozen<T> back to Frozen<T>
+        return try json.parse::<Frozen<T>>(data!);
     }
 
     /// Serialize to JSON string
@@ -311,4 +350,104 @@ test "worker response roundtrip serialization" {
     assert_eq restored.status, original.status;
     assert_eq restored.body, original.body;
     assert_eq restored.headers.get("Cache-Control"), "no-cache";
+}
+
+// ============================================
+// Test structs for frozen data tests
+// ============================================
+
+struct FrozenTestConfig {
+    timeout: int,
+    name: string,
+}
+
+// ============================================
+// frozen<T>() tests
+// ============================================
+
+test "worker context frozen data retrieval" {
+    // Create frozen data
+    let config = try! freeze(FrozenTestConfig { timeout: 30, name: "test" });
+    let frozen_json = try! json.to_string(config);
+
+    // Create WorkerContext with frozen data
+    let ctx = WorkerContext.new(
+        "/test",
+        "GET",
+        {:},
+        {:},
+        {:},
+        ""
+    );
+    ctx.frozen_data["config"] = frozen_json;
+
+    // Retrieve frozen data
+    let retrieved = try! ctx.frozen::<FrozenTestConfig>("config");
+    let value = try! retrieved.get();
+
+    assert_eq value.timeout, 30;
+    assert_eq value.name, "test";
+}
+
+test "worker context frozen missing throws" {
+    let ctx = WorkerContext.new(
+        "/test",
+        "GET",
+        {:},
+        {:},
+        {:},
+        ""
+    );
+
+    // Should throw when trying to get non-existent frozen data
+    let threw = false;
+    if (let _ = try? ctx.frozen::<int>("missing")) {
+        // Should not succeed
+    } else {
+        threw = true;
+    }
+    assert threw;
+}
+
+test "worker context frozen roundtrip through json" {
+    // Create frozen data
+    let config = try! freeze(FrozenTestConfig { timeout: 60, name: "roundtrip" });
+    let frozen_json = try! json.to_string(config);
+
+    // Create WorkerContext with frozen data
+    let original_ctx = WorkerContext.new(
+        "/test",
+        "GET",
+        {:},
+        {:},
+        {:},
+        ""
+    );
+    original_ctx.frozen_data["config"] = frozen_json;
+
+    // Serialize and deserialize WorkerContext (simulating cross-thread transfer)
+    let ctx_json = try! original_ctx.to_json();
+    let restored_ctx = try! WorkerContext.from_json(ctx_json);
+
+    // Retrieve frozen data from restored context
+    let retrieved = try! restored_ctx.frozen::<FrozenTestConfig>("config");
+    let value = try! retrieved.get();
+
+    assert_eq value.timeout, 60;
+    assert_eq value.name, "roundtrip";
+}
+
+test "worker context multiple frozen values" {
+    let num = try! freeze(42);
+    let text = try! freeze("hello world");
+
+    let ctx = WorkerContext.new("/test", "GET", {:}, {:}, {:}, "");
+    ctx.frozen_data["number"] = try! json.to_string(num);
+    ctx.frozen_data["text"] = try! json.to_string(text);
+
+    let num_frozen = try! ctx.frozen::<int>("number");
+    let text_frozen = try! ctx.frozen::<string>("text");
+
+    assert_eq try! num_frozen.get(), 42;
+    assert_eq try! text_frozen.get(), "hello world";
 }

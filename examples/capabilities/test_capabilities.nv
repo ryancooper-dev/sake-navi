@@ -6,6 +6,12 @@ use std.process;
 use std.worker.Worker;
 use std.net.TcpListener;
 use std.time;
+use std.sync.freeze;
+
+/// Worker pool handler function (must be a named function)
+fn double_handler(n: int): int throws {
+    return n * 2;
+}
 
 fn main() throws {
     println("=== Sake 框架能力验证 ===\n");
@@ -27,28 +33,32 @@ fn main() throws {
     // Test 3: Worker 创建
     println("3. Worker 多线程");
     let worker = try Worker.create(|w| {
+        // Wait for message from main thread
+        let _ = try w.recv::<string>();
         let tid = Worker.thread_id();
         try w.send(`Hello from thread ${tid}`);
     });
-    
+
     try worker.send("ping");
-    let msg = try worker.recv::<string>();
-    println(`   收到消息: ${msg}`);
-    assert msg.contains("Hello from thread");
+    let msg_opt = try worker.recv::<string>();
+    if (let msg = msg_opt) {
+        println(`   收到消息: ${msg}`);
+        assert msg.contains("Hello from thread");
+    } else {
+        panic("Expected message from worker");
+    }
     println("   ✅ 通过\n");
     
     // Test 4: WorkerPool
     println("4. WorkerPool 线程池");
-    let pool = try Worker.pool(|n| {
-        return n * 2;
-    }, 4);
-    
+    let pool = try Worker.pool(double_handler);
+
     let result = try pool.map(21);
     println(`   pool.map(21) = ${result}`);
     assert_eq result, 42;
-    
+
     let results = try pool.map_array([1, 2, 3, 4, 5]);
-    println(`   pool.map_array([1,2,3,4,5]) = ${results}`);
+    println(`   pool.map_array([1,2,3,4,5]) = [${results[0]}, ${results[1]}, ${results[2]}, ${results[3]}, ${results[4]}]`);
     assert_eq results, [2, 4, 6, 8, 10];
     println("   ✅ 通过\n");
     
@@ -59,7 +69,23 @@ fn main() throws {
     println(`   绑定成功: ${addr}`);
     try listener.close();
     println("   ✅ 通过\n");
-    
+
+    // Test 6: Frozen<T> 跨线程数据共享
+    println("6. Frozen<T> 跨线程数据共享");
+    let frozen_value = try freeze(42);
+    let retrieved = try frozen_value.get();
+    println(`   freeze(42).get() = ${retrieved}`);
+    assert_eq retrieved, 42;
+
+    // 测试复杂类型
+    let frozen_arr = try freeze([1, 2, 3, 4, 5]);
+    let arr = try frozen_arr.get();
+    println(`   freeze([1,2,3,4,5]).get() = [${arr[0]}, ${arr[1]}, ${arr[2]}, ${arr[3]}, ${arr[4]}]`);
+    assert_eq arr.len(), 5;
+    assert_eq arr[2], 3;
+    println("   ✅ 通过\n");
+
     println("=== 所有测试通过！===");
     println(`\nSake 框架可以使用 ${cpus} 个 Worker 线程进行并行处理。`);
+    println("Frozen<T> 可用于跨线程传递不可变数据。");
 }

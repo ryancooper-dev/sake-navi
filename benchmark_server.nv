@@ -1,20 +1,38 @@
 /// Benchmark server for Sake framework
 /// Simple server for load testing
+///
+/// Demonstrates:
+/// - Basic spawn mode handlers (default, single-threaded)
+/// - Worker mode handlers with Frozen<T> data (multi-threaded)
 
 use src.{Engine, Config, func_handler};
+use src.{WorkerContext, WorkerResponse, WorkerConfig};
+use std.sync.freeze;
+
+/// Dummy handler for with_handler() API
+/// In Phase 0, this is registered but not called - the built-in config_handler
+/// in worker_pool.nv reads Frozen<WorkerConfig> and handles the request
+fn dummy_handler(ctx: WorkerContext): WorkerResponse throws {
+    return WorkerResponse.text(200, "placeholder");
+}
 
 fn main() throws {
-    let config = Config.with_defaults()
-        .with_max_connections(10000);
-        // Note: .worker() routes with closures don't work in Phase 0
-        // because closures can't be serialized to worker threads.
-        // Use spawn mode (default) for closure-based handlers.
+    let server_config = Config.with_defaults()
+        .with_max_connections(10000)
+        .with_worker_pool_size(0);  // Auto-detect CPU count
 
-    let app = Engine.new(config);
+    let app = Engine.new(server_config);
 
-    // Register routes using func_handler pattern with worker pool
-    // Each route needs .worker() to use the worker pool
+    // Create Frozen<WorkerConfig> for worker threads
+    // WorkerConfig is defined in worker_pool.nv and available in worker threads
+    let config = try freeze(WorkerConfig {
+        version: "1.0.0",
+        message: "Hello from Sake!",
+        max_n: 40,
+    });
+    println("Created Frozen<WorkerConfig> for cross-thread data sharing");
 
+    // Spawn mode routes (single-threaded, default)
     app.get("/", func_handler(|ctx| {
         println(`[REQUEST] GET /`);
         ctx.string("Hello, World!");
@@ -34,12 +52,26 @@ fn main() throws {
         ctx.string(`Hello, ${name}!`);
     }));
 
-    println("🍶 Sake Benchmark Server");
-    println("========================");
-    println("Endpoints:");
-    println("  GET /         - Simple text response");
-    println("  GET /json     - JSON response");
+    // Worker mode route - uses with_handler() API (no explicit handler_id)
+    // The built-in config_handler in worker_pool.nv reads Frozen<WorkerConfig>
+    try app.get("/worker/json", func_handler(|ctx| {
+        ctx.string("placeholder");
+    })).worker()
+        .with_handler(dummy_handler)
+        .with_frozen("config", config);
+
+    println("");
+    println("Sake Benchmark Server (Frozen<T> Demo)");
+    println("======================================");
+    println(`Worker Pool Size: ${server_config.effective_worker_pool_size()} threads`);
+    println("");
+    println("Spawn Mode Endpoints (single-threaded):");
+    println("  GET /           - Simple text response");
+    println("  GET /json       - JSON response");
     println("  GET /echo/:name - Echo with parameter");
+    println("");
+    println("Worker Mode Endpoints (multi-threaded + Frozen<WorkerConfig>):");
+    println("  GET /worker/json - JSON using Frozen config data from main thread");
     println("");
     println("Starting server on 0.0.0.0:8080...");
 

@@ -1,14 +1,13 @@
 /// Phase 0 Benchmark Server
-/// Tests pure function handlers with REGISTRY
+/// Tests built-in CPU handler in WorkerPool
 ///
 /// Compare:
 ///   /spawn/:n   - Single-threaded spawn mode
-///   /worker/:n  - Multi-threaded WorkerPool with registered handler
+///   /worker/:n  - Multi-threaded WorkerPool with built-in handler
 
 use src.{Engine, Config, func_handler};
-use src.{WorkerContext, WorkerResponse, REGISTRY};
 
-/// CPU-intensive fibonacci computation
+/// CPU-intensive fibonacci computation (for spawn mode)
 fn fibonacci(n: int): int {
     if (n <= 1) {
         return n;
@@ -16,30 +15,12 @@ fn fibonacci(n: int): int {
     return fibonacci(n - 1) + fibonacci(n - 2);
 }
 
-/// Pure function handler for WorkerPool execution
-fn cpu_handler(ctx: WorkerContext): WorkerResponse throws {
-    let n_str = ctx.params.get("n") || "30";
-    let n = n_str.parse_int() || 30;
-
-    if (n > 40) {
-        return WorkerResponse.json(400, `{"error": "n too large", "max": 40}`);
-    }
-
-    let result = fibonacci(n);
-
-    return WorkerResponse.json(200, `{"n": ${n}, "result": ${result}, "mode": "worker_pool"}`);
-}
-
 fn main() throws {
-    let config = Config.with_defaults()
+    let server_config = Config.with_defaults()
         .with_max_connections(10000)
         .with_worker_pool_size(0);  // Auto-detect CPU count
 
-    let app = Engine.new(config);
-
-    // Register pure function handler
-    let cpu_id = REGISTRY.register(cpu_handler);
-    println(`Registered cpu_handler with id: ${cpu_id}`);
+    let app = Engine.new(server_config);
 
     // Home page
     app.get("/", func_handler(|ctx| {
@@ -64,20 +45,22 @@ fn main() throws {
         ctx.data("application/json", `{"n": ${n}, "result": ${result}, "mode": "spawn"}`);
     }));
 
-    // Worker mode with registered pure function handler
+    // Worker mode - use built-in CPU handler (handler_id=0)
+    // The built-in handler in worker_pool.nv provides fibonacci computation.
+    // Note: User-defined handlers (with_handler) will work in Phase 1.
     app.get("/worker/:n", func_handler(|ctx| {
         ctx.string("placeholder");
-    })).worker().with_handler_id(cpu_id);
+    })).worker()
+        .with_handler_id(0);
 
     println("");
     println("Phase 0 Benchmark Server");
     println("========================");
-    println(`Worker Pool Size: ${config.effective_worker_pool_size()} threads`);
-    println(`Registered Handlers: ${REGISTRY.len()}`);
+    println(`Worker Pool Size: ${server_config.effective_worker_pool_size()} threads`);
     println("");
     println("Endpoints:");
     println("  GET /spawn/:n  - Single-threaded (baseline)");
-    println("  GET /worker/:n - Multi-threaded WorkerPool");
+    println("  GET /worker/:n - Multi-threaded WorkerPool (built-in CPU handler)");
     println("");
     println("Benchmark commands:");
     println("  wrk -t4 -c100 -d30s http://localhost:8080/spawn/35");

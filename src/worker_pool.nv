@@ -7,6 +7,7 @@
 
 use std.worker.Worker;
 use std.json;
+use std.sync.freeze;
 // Note: worker_context and handler_registry are in same module
 
 // ============================================
@@ -39,6 +40,32 @@ fn builtin_cpu_handler(ctx: WorkerContext): WorkerResponse throws {
     println(`[WORKER] fibonacci(${n}) = ${result}`);
 
     return WorkerResponse.json(200, `{"n": ${n}, "result": ${result}, "mode": "worker_pool"}`);
+}
+
+// ============================================
+// Generic Config type for Frozen<T> testing
+// Users can define their own types with matching fields
+// ============================================
+
+/// Generic server config for testing Frozen<T> data passing
+/// This struct is defined here so it's available in worker threads
+pub struct WorkerConfig {
+    pub version: string,
+    pub message: string,
+    pub max_n: int,
+}
+
+/// Built-in config handler (handler_id > 0 with frozen "config")
+/// Reads Frozen<WorkerConfig> and returns JSON with config values
+fn builtin_config_handler(ctx: WorkerContext): WorkerResponse throws {
+    // Get frozen config from context
+    let config_frozen = try ctx.frozen::<WorkerConfig>("config");
+    let config = try config_frozen.get();
+
+    println(`[WORKER] GET ${ctx.path} (version=${config.version})`);
+
+    // Return response using frozen config data
+    return WorkerResponse.json(200, `{"message": "${config.message}", "version": "${config.version}", "max_n": ${config.max_n}, "path": "${ctx.path}", "worker": true}`);
 }
 
 /// Worker pool for parallel task execution
@@ -103,19 +130,33 @@ impl SakeWorkerPool {
 
         // Phase 0: Use built-in handlers based on handler_id
         // handler_id 0 = CPU-intensive fibonacci handler (for benchmarking)
+        // handler_id > 0 = user registered handler (use Frozen data if available)
         // In Phase 1+, we'll implement proper cross-thread handler registration
         if (ctx.handler_id == 0) {
             let response = try builtin_cpu_handler(ctx);
             return try response.to_json();
         }
 
-        // Check if a handler is registered in REGISTRY (future use)
-        if (ctx.handler_id > 0 && REGISTRY.has(ctx.handler_id)) {
-            let response = try REGISTRY.call(ctx.handler_id, ctx);
+        // Phase 0: For user-registered handlers (handler_id > 0), call built-in
+        // config handler if frozen "config" data is available
+        if (ctx.handler_id > 0) {
+            // Check if frozen "config" is available
+            if (ctx.frozen_data.get("config") != nil) {
+                // Use built-in config handler that reads Frozen<WorkerConfig>
+                let response = try builtin_config_handler(ctx);
+                return try response.to_json();
+            }
+
+            // No frozen config, return default worker response
+            let response = WorkerResponse.new(
+                200,
+                {"Content-Type": "application/json"},
+                `{"status": "ok", "worker": true, "handler_id": ${ctx.handler_id}, "path": "${ctx.path}"}`
+            );
             return try response.to_json();
         }
 
-        // Fallback: no handler found, return default response
+        // Fallback: handler_id < 0 means no registered handler
         let response = WorkerResponse.new(
             200,
             {"Content-Type": "application/json"},

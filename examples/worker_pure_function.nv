@@ -5,14 +5,23 @@
 /// - Receive all data through WorkerContext (no closures)
 /// - Return WorkerResponse (no mutable Context)
 /// - Are registered with REGISTRY and called by handler_id
+/// - Can access Frozen<T> data via with_frozen() API for cross-thread data sharing
 ///
 /// This approach enables true multi-threaded parallel execution because:
 /// 1. Pure functions have no closure captures from main thread's ObjectPool
 /// 2. WorkerContext/WorkerResponse are serializable across threads
 /// 3. REGISTRY provides a global lookup table for handlers
+/// 4. Frozen<T> enables type-safe immutable data sharing across threads
 
 use sake.{Engine, Config};
-use sake.{WorkerContext, WorkerResponse, REGISTRY};
+use sake.{WorkerContext, WorkerResponse};
+use std.sync.freeze;
+
+/// Configuration struct for handlers
+struct AppConfig {
+    max_fibonacci: int,
+    greeting_prefix: string,
+}
 
 /// Compute fibonacci number (CPU-intensive)
 fn fibonacci(n: int): int {
@@ -26,29 +35,41 @@ fn fibonacci(n: int): int {
 ///
 /// This is a simple handler that demonstrates the WorkerHandler signature:
 /// `fn(WorkerContext): WorkerResponse throws`
+///
+/// Uses Frozen<AppConfig> to get greeting prefix from main thread
 fn hello_handler(ctx: WorkerContext): WorkerResponse throws {
     let name = ctx.query.get("name") || "World";
-    return WorkerResponse.json(200, `{"message": "Hello, ${name}!", "handler": "pure_function"}`);
+
+    // Get frozen config from main thread
+    let config_frozen = try ctx.frozen::<AppConfig>("config");
+    let config = try config_frozen.get();
+
+    return WorkerResponse.json(200, `{"message": "${config.greeting_prefix}, ${name}!", "handler": "pure_function"}`);
 }
 
 /// Pure function handler: Fibonacci computation
 ///
 /// Demonstrates parsing query parameters and returning JSON response
+/// Uses Frozen<AppConfig> to get max_fibonacci limit from main thread
 fn fibonacci_handler(ctx: WorkerContext): WorkerResponse throws {
     // Extract 'n' from query params or path params
     let n_str = ctx.query.get("n") || ctx.params.get("n") || "10";
     let n = try? n_str.parse::<int>() || 10;
 
-    // Validate input
-    if (n > 40) {
-        return WorkerResponse.json(400, `{"error": "Number too large (max 40)", "n": ${n}}`);
+    // Get frozen config for validation
+    let config_frozen = try ctx.frozen::<AppConfig>("config");
+    let config = try config_frozen.get();
+
+    // Validate input using config
+    if (n > config.max_fibonacci) {
+        return WorkerResponse.json(400, `{"error": "Number too large", "max": ${config.max_fibonacci}, "n": ${n}}`);
     }
 
     // Compute (CPU-intensive)
     let result = fibonacci(n);
 
     // Return JSON response
-    return WorkerResponse.json(200, `{"n": ${n}, "fibonacci": ${result}, "computed_in": "worker_pool", "handler": "pure_function"}`);
+    return WorkerResponse.json(200, `{"n": ${n}, "fibonacci": ${result}, "max_allowed": ${config.max_fibonacci}, "computed_in": "worker_pool", "handler": "pure_function"}`);
 }
 
 /// Pure function handler: Echo request details
@@ -69,19 +90,19 @@ fn echo_handler(ctx: WorkerContext): WorkerResponse throws {
 
 fn main() throws {
     // Configure with auto-detected worker pool size
-    let config = Config.with_defaults()
+    let server_config = Config.with_defaults()
         .with_worker_pool_size(0);  // 0 = auto-detect CPU count
 
-    let app = Engine.new(config);
+    let app = Engine.new(server_config);
 
     // ===========================================
-    // Register pure function handlers with REGISTRY
+    // Create Frozen config for cross-thread sharing
     // ===========================================
-    let hello_id = REGISTRY.register(hello_handler);
-    let fib_id = REGISTRY.register(fibonacci_handler);
-    let echo_id = REGISTRY.register(echo_handler);
-
-    println(`Registered handlers: hello=${hello_id}, fibonacci=${fib_id}, echo=${echo_id}`);
+    let app_config = try freeze(AppConfig {
+        max_fibonacci: 40,
+        greeting_prefix: "Hello",
+    });
+    println("Created Frozen<AppConfig> for cross-thread data sharing");
 
     // ===========================================
     // Regular closure-based route (for comparison)
@@ -91,31 +112,38 @@ fn main() throws {
     });
 
     // ===========================================
-    // Pure function handler routes
+    // Pure function handler routes (simplified API)
     // ===========================================
 
     // Hello handler - simple JSON response
-    // The closure here is just a placeholder; actual execution happens in WorkerPool
-    app.get("/hello", |ctx| {
-        // This closure is NOT executed when .worker() is used with handler_id
-        // The WorkerPool calls the registered handler directly
+    // with_handler() auto-registers the handler, no explicit REGISTRY.register() needed
+    // with_frozen("config", app_config) makes Frozen<AppConfig> available in worker
+    try app.get("/hello", |ctx| {
         ctx.string("placeholder");
-    }).worker().with_handler_id(hello_id);
+    }).worker()
+        .with_handler(hello_handler)
+        .with_frozen("config", app_config);
 
     // Fibonacci handler - CPU-intensive computation
-    app.get("/fib", |ctx| {
+    // Frozen config is passed to worker for validation limits
+    try app.get("/fib", |ctx| {
         ctx.string("placeholder");
-    }).worker().with_handler_id(fib_id);
+    }).worker()
+        .with_handler(fibonacci_handler)
+        .with_frozen("config", app_config);
 
     // Fibonacci with path parameter
-    app.get("/fib/:n", |ctx| {
+    try app.get("/fib/:n", |ctx| {
         ctx.string("placeholder");
-    }).worker().with_handler_id(fib_id);
+    }).worker()
+        .with_handler(fibonacci_handler)
+        .with_frozen("config", app_config);
 
-    // Echo handler - shows request details
+    // Echo handler - shows request details (no frozen data needed)
     app.get("/echo", |ctx| {
         ctx.string("placeholder");
-    }).worker().with_handler_id(echo_id);
+    }).worker()
+        .with_handler(echo_handler);
 
     // ===========================================
     // Comparison: closure-based worker (old style)
@@ -133,15 +161,17 @@ fn main() throws {
     println("");
     println("Starting Worker Pure Function Demo...");
     println("");
-    println("Pure function handlers (multi-threaded):");
-    println("  http://localhost:8080/hello           - Hello world");
+    println("Pure function handlers (multi-threaded with Frozen<T> data):");
+    println("  http://localhost:8080/hello           - Hello world (uses Frozen<AppConfig>)");
     println("  http://localhost:8080/hello?name=Navi - Hello with name");
-    println("  http://localhost:8080/fib?n=35        - Fibonacci");
+    println("  http://localhost:8080/fib?n=35        - Fibonacci (uses Frozen<AppConfig> for max limit)");
     println("  http://localhost:8080/fib/35          - Fibonacci (path param)");
-    println("  http://localhost:8080/echo            - Echo request");
+    println("  http://localhost:8080/echo            - Echo request (no frozen data)");
     println("");
     println("Closure-based handler (fallback):");
     println("  http://localhost:8080/fib-closure/35  - Fallback mode");
+    println("");
+    println("Note: Frozen<AppConfig> is created in main thread and passed to workers via with_frozen()");
     println("");
 
     try app.run(":8080");
