@@ -26,6 +26,30 @@ use std.io.{BufReader, Bytes};
 use std.time;
 // Note: config, router, context, request, response, worker_pool, worker_task, metrics are in same module
 
+/// Connection counter for spawn-safe tracking
+/// Object references are shared between main loop and spawns in single-threaded mode
+struct ConnectionCounter {
+    value: int,
+}
+
+impl ConnectionCounter {
+    pub fn new(): ConnectionCounter {
+        return ConnectionCounter { value: 0 };
+    }
+
+    pub fn inc(self) {
+        self.value += 1;
+    }
+
+    pub fn dec(self) {
+        self.value -= 1;
+    }
+
+    pub fn get(self): int {
+        return self.value;
+    }
+}
+
 /// Sake web framework engine
 pub struct Engine {
     /// Router for route matching
@@ -279,18 +303,31 @@ impl Engine {
     ///
     /// P0 Optimizations:
     /// - Connection limiting: fast-reject when at max_connections
-    /// - Keep-Alive: reuse connections for multiple requests
     fn run_spawn_only(self, listener: TcpListener) throws {
+        // Connection counter using object reference (spawn-safe in single-threaded mode)
+        let counter = ConnectionCounter.new();
+
         loop {
             // Accept connection (blocking)
             let stream = try listener.accept();
 
+            // P0: Connection limiting - fast reject when at capacity
+            if (counter.get() >= self.config.max_connections) {
+                try? stream.write_all("HTTP/1.1 503 Service Unavailable\r\nRetry-After: 1\r\nConnection: close\r\nContent-Length: 0\r\n\r\n".bytes());
+                try? stream.close();
+                continue;
+            }
+
+            counter.inc();
+
             // Handle connection in spawn
             spawn {
                 let stream = stream;
+                let counter = counter;  // Capture object reference
 
                 defer {
                     try? stream.close();
+                    counter.dec();  // Decrement when spawn exits
                 }
 
                 try? self.handle_single_request(stream);
