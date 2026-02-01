@@ -7,17 +7,17 @@ The Context object is passed to every handler and provides access to request dat
 ### Path and Method
 
 ```nv
-app.get("/api/users/:id", |ctx| {
+app.get("/api/users/:id", func_handler(|ctx| {
     let method = ctx.method();     // "GET"
     let path = ctx.path();         // "/api/users/123"
     let uri = ctx.uri();           // "/api/users/123?page=1"
-});
+}));
 ```
 
 ### Path Parameters
 
 ```nv
-app.get("/users/:userId/posts/:postId", |ctx| {
+app.get("/users/:userId/posts/:postId", func_handler(|ctx| {
     // Returns string? (optional)
     let user_id = ctx.param("userId");
     let post_id = ctx.param("postId");
@@ -25,13 +25,13 @@ app.get("/users/:userId/posts/:postId", |ctx| {
     if (let uid = user_id) {
         println(`User ID: ${uid}`);
     }
-});
+}));
 ```
 
 ### Query Parameters
 
 ```nv
-app.get("/search", |ctx| {
+app.get("/search", func_handler(|ctx| {
     // GET /search?q=navi&page=2&limit=10
 
     // Optional access
@@ -42,14 +42,14 @@ app.get("/search", |ctx| {
     let limit = ctx.default_query("limit", "20");  // string
 
     // Parse to int
-    let page_num = try? ctx.query("page")?.parse::<int>() || 1;
-});
+    let page_num = ctx.query("page")?.parse::<int>() ?? 1;
+}));
 ```
 
 ### Headers
 
 ```nv
-app.get("/", |ctx| {
+app.get("/", func_handler(|ctx| {
     // Headers are case-insensitive
     let content_type = ctx.header("content-type");
     let auth = ctx.header("Authorization");
@@ -57,13 +57,13 @@ app.get("/", |ctx| {
 
     // Content-Type shortcut
     let ct = ctx.content_type();
-});
+}));
 ```
 
 ### Request Body
 
 ```nv
-app.post("/users", |ctx| {
+app.post("/users", func_handler(|ctx| {
     // Raw body
     let body = ctx.body();  // string
 
@@ -77,7 +77,7 @@ app.post("/users", |ctx| {
     if (let u = user) {
         println(`Creating user: ${u.name}`);
     }
-});
+}));
 ```
 
 ## Response Methods
@@ -85,94 +85,94 @@ app.post("/users", |ctx| {
 ### String Response
 
 ```nv
-app.get("/text", |ctx| {
+app.get("/text", func_handler(|ctx| {
     ctx.string("Hello, World!");
     // Content-Type: text/plain
-});
+}));
 ```
 
 ### JSON Response
 
 ```nv
-app.get("/json", |ctx| {
+app.get("/json", func_handler(|ctx| {
     try? ctx.json({
         "message": "Hello",
         "count": 42,
         "items": ["a", "b", "c"],
     });
     // Content-Type: application/json
-});
+}));
 ```
 
 ### HTML Response
 
 ```nv
-app.get("/html", |ctx| {
+app.get("/html", func_handler(|ctx| {
     ctx.html("<h1>Hello, World!</h1>");
     // Content-Type: text/html
-});
+}));
 ```
 
 ### XML Response
 
 ```nv
-app.get("/xml", |ctx| {
+app.get("/xml", func_handler(|ctx| {
     ctx.xml("<user><name>Alice</name></user>");
     // Content-Type: application/xml
-});
+}));
 ```
 
 ### YAML Response
 
 ```nv
-app.get("/yaml", |ctx| {
+app.get("/yaml", func_handler(|ctx| {
     ctx.yaml("name: Alice\nage: 30\n");
     // Content-Type: application/yaml
-});
+}));
 ```
 
 ### Custom Content Type
 
 ```nv
-app.get("/custom", |ctx| {
+app.get("/custom", func_handler(|ctx| {
     ctx.data("application/octet-stream", binary_data);
-});
+}));
 ```
 
 ### Status Code
 
 ```nv
-app.get("/status", |ctx| {
+app.get("/status", func_handler(|ctx| {
     ctx.status(201);
     try? ctx.json({"created": true});
-});
+}));
 
-app.get("/not-found", |ctx| {
+app.get("/not-found", func_handler(|ctx| {
     ctx.status(404);
     ctx.string("Resource not found");
-});
+}));
 ```
 
 ### Set Headers
 
 ```nv
-app.get("/", |ctx| {
+app.get("/", func_handler(|ctx| {
     ctx.set_header("X-Custom-Header", "value");
     ctx.set_header("Cache-Control", "no-cache");
     ctx.string("OK");
-});
+}));
 ```
 
 ### Redirect
 
 ```nv
-app.get("/old-path", |ctx| {
+app.get("/old-path", func_handler(|ctx| {
     ctx.redirect(301, "/new-path");  // Permanent redirect
-});
+}));
 
-app.get("/temp-redirect", |ctx| {
+app.get("/temp-redirect", func_handler(|ctx| {
     ctx.redirect(302, "/other");     // Temporary redirect
-});
+}));
 ```
 
 ## Middleware Control
@@ -180,62 +180,62 @@ app.get("/temp-redirect", |ctx| {
 ### Next Handler
 
 ```nv
-fn my_middleware(): fn(ctx: Context) throws {
-    return |ctx| {
+fn my_middleware(): Handler {
+    return func_handler(|ctx| {
         println("Before handler");
         try ctx.next();  // Execute next middleware/handler
         println("After handler");
-    };
+    });
 }
 ```
 
 ### Abort Chain
 
 ```nv
-fn auth_check(): fn(ctx: Context) throws {
-    return |ctx| {
+fn auth_check(): Handler {
+    return func_handler(|ctx| {
         if (!is_authenticated(ctx)) {
             ctx.abort();  // Stop the chain
             return;
         }
         try ctx.next();
-    };
+    });
 }
 
 // With status code
-fn auth_check(): fn(ctx: Context) throws {
-    return |ctx| {
+fn auth_check(): Handler {
+    return func_handler(|ctx| {
         if (!is_authenticated(ctx)) {
             ctx.abort_with_status(401);
             return;
         }
         try ctx.next();
-    };
+    });
 }
 
 // With JSON error
-fn auth_check(): fn(ctx: Context) throws {
-    return |ctx| {
+fn auth_check(): Handler {
+    return func_handler(|ctx| {
         if (!is_authenticated(ctx)) {
             ctx.abort_with_error(401, "Unauthorized");
             return;
         }
         try ctx.next();
-    };
+    });
 }
 ```
 
 ### Check if Aborted
 
 ```nv
-fn my_middleware(): fn(ctx: Context) throws {
-    return |ctx| {
+fn my_middleware(): Handler {
+    return func_handler(|ctx| {
         try ctx.next();
 
         if (ctx.is_aborted()) {
             println("Request was aborted");
         }
-    };
+    });
 }
 ```
 
@@ -269,25 +269,25 @@ let score = ctx.get_float("score");      // float?
 
 ```nv
 // In middleware
-fn user_loader(): fn(ctx: Context) throws {
-    return |ctx| {
+fn user_loader(): Handler {
+    return func_handler(|ctx| {
         let user_id = parse_token(ctx.header("authorization"));
         ctx.set("user_id", user_id);
         ctx.set("is_admin", check_admin(user_id));
         try ctx.next();
-    };
+    });
 }
 
 // In handler
-app.get("/profile", |ctx| {
-    let user_id = ctx.get_int("user_id") || 0;
-    let is_admin = ctx.get_bool("is_admin") || false;
+app.get("/profile", func_handler(|ctx| {
+    let user_id = ctx.get_string("user_id") ?? "0";
+    let is_admin = ctx.get_bool("is_admin") ?? false;
 
     try? ctx.json({
         "user_id": user_id,
         "is_admin": is_admin,
     });
-});
+}));
 ```
 
 ## Worker Pool Context
@@ -295,27 +295,28 @@ app.get("/profile", |ctx| {
 Check if running in worker pool:
 
 ```nv
-app.get("/compute", |ctx| {
+app.get("/compute", func_handler(|ctx| {
     if (ctx.in_worker_pool()) {
         println("Running in parallel worker");
     }
 
     let pool_size = ctx.worker_pool_size();
     println(`Pool has ${pool_size} workers`);
-}).worker();
+})).worker();
 ```
 
 ## Full Example
 
 ```nv
-use src.Engine;
+use sake.{Engine, func_handler};
 
 fn main() throws {
-    let app = Engine.default();
+    let app = Engine.with_defaults();
 
-    app.post("/api/users", |ctx| {
+    app.post("/api/users", func_handler(|ctx| {
         // Validate content type
-        if (ctx.content_type() != "application/json") {
+        let ct = ctx.content_type() ?? "";
+        if (!ct.contains("application/json")) {
             ctx.status(415);
             try? ctx.json({"error": "Content-Type must be application/json"});
             return;
@@ -346,7 +347,7 @@ fn main() throws {
                 "email": req.email,
             });
         }
-    });
+    }));
 
     try app.run(":8080");
 }

@@ -51,7 +51,7 @@ Client requests → ├─ Worker 2 ─┼─ execute_handler()
 ### Setting Up WorkerPool
 
 ```nv
-use src.{Engine, Config};
+use sake.{Engine, Config, func_handler};
 
 fn main() throws {
     let config = Config.with_defaults()
@@ -101,7 +101,7 @@ let config = Config.with_defaults()
 ### Mark Routes for Worker Pool
 
 ```nv
-use src.{Engine, Config};
+use sake.{Engine, Config, func_handler};
 
 fn main() throws {
     let config = Config.with_defaults()
@@ -110,24 +110,24 @@ fn main() throws {
     let app = Engine.new(config);
 
     // I/O-bound route (default spawn mode)
-    app.get("/api/users", |ctx| {
+    app.get("/api/users", func_handler(|ctx| {
         let users = try? db.query("SELECT * FROM users");
         try? ctx.json(users);
-    });
+    }));
 
     // CPU-intensive route (worker pool)
-    app.get("/compute/fibonacci/:n", |ctx| {
-        let n = try? ctx.param("n")?.parse::<int>() || 10;
+    app.get("/compute/fibonacci/:n", func_handler(|ctx| {
+        let n = ctx.param("n")?.parse::<int>() ?? 10;
         let result = fibonacci(n);
         try? ctx.json({"result": result});
-    }).worker();  // ← Execute in parallel
+    })).worker();  // ← Execute in parallel
 
     // Image processing (worker pool)
-    app.post("/images/resize", |ctx| {
+    app.post("/images/resize", func_handler(|ctx| {
         let image = ctx.body();
         let resized = resize_image(image);
         ctx.data("image/png", resized);
-    }).worker();
+    })).worker();
 
     try app.run(":8080");
 }
@@ -136,9 +136,9 @@ fn main() throws {
 ### Worker Mode with Middleware
 
 ```nv
-app.get("/heavy-compute", |ctx| {
+app.get("/heavy-compute", func_handler(|ctx| {
     // CPU-intensive work
-}).use(auth_middleware()).worker();
+})).add_middleware(auth_middleware()).worker();
 ```
 
 ### Worker Mode in Route Groups
@@ -146,15 +146,15 @@ app.get("/heavy-compute", |ctx| {
 ```nv
 let compute = app.group("/compute");
 
-compute.get("/hash/:input", |ctx| {
-    let input = ctx.param("input") || "";
+compute.get("/hash/:input", func_handler(|ctx| {
+    let input = ctx.param("input") ?? "";
     let hash = compute_hash(input);
     try? ctx.json({"hash": hash});
-}).worker();
+})).worker();
 
-compute.get("/encrypt", |ctx| {
+compute.get("/encrypt", func_handler(|ctx| {
     // ...
-}).worker();
+})).worker();
 ```
 
 ## When to Use Each Mode
@@ -169,15 +169,15 @@ compute.get("/encrypt", |ctx| {
 
 ```nv
 // These should use spawn (default)
-app.get("/api/users", |ctx| {
+app.get("/api/users", func_handler(|ctx| {
     let users = try? db.query("...");  // I/O wait
     try? ctx.json(users);
-});
+}));
 
-app.get("/api/external", |ctx| {
+app.get("/api/external", func_handler(|ctx| {
     let data = try? http.get("...");   // Network wait
     try? ctx.json(data);
-});
+}));
 ```
 
 ### Use Worker Pool When:
@@ -190,17 +190,17 @@ app.get("/api/external", |ctx| {
 
 ```nv
 // These should use worker pool
-app.get("/compute/:n", |ctx| {
-    let n = try? ctx.param("n")?.parse::<int>() || 10;
+app.get("/compute/:n", func_handler(|ctx| {
+    let n = ctx.param("n")?.parse::<int>() ?? 10;
     let result = expensive_math(n);  // CPU-bound
     try? ctx.json({"result": result});
-}).worker();
+})).worker();
 
-app.post("/process-image", |ctx| {
+app.post("/process-image", func_handler(|ctx| {
     let image = ctx.body();
     let processed = apply_filters(image);  // CPU-bound
     ctx.data("image/png", processed);
-}).worker();
+})).worker();
 ```
 
 ## Performance Considerations
@@ -231,17 +231,17 @@ Worker pool requires serializing request context across threads:
 // Context is serialized to JSON for worker threads
 // Keep request/response data reasonably sized
 
-app.post("/process", |ctx| {
+app.post("/process", func_handler(|ctx| {
     let body = ctx.body();  // Serialized to worker
     // Process...
     try? ctx.json(result);  // Result serialized back
-}).worker();
+})).worker();
 ```
 
 ## Example: Hybrid Application
 
 ```nv
-use src.{Engine, Config};
+use sake.{Engine, Config, func_handler};
 use std.vm;
 
 fn main() throws {
@@ -254,36 +254,36 @@ fn main() throws {
 
     // === I/O-bound routes (spawn) ===
 
-    app.get("/api/users", |ctx| {
+    app.get("/api/users", func_handler(|ctx| {
         let users = try? db.query("SELECT * FROM users");
         try? ctx.json(users);
-    });
+    }));
 
-    app.get("/api/posts/:id", |ctx| {
+    app.get("/api/posts/:id", func_handler(|ctx| {
         let id = ctx.param("id");
         let post = try? db.query(`SELECT * FROM posts WHERE id = ${id}`);
         try? ctx.json(post);
-    });
+    }));
 
     // === CPU-bound routes (worker) ===
 
-    app.get("/api/stats/compute", |ctx| {
+    app.get("/api/stats/compute", func_handler(|ctx| {
         let data = try? db.query("SELECT * FROM metrics");
         let stats = compute_statistics(data);  // CPU-intensive
         try? ctx.json(stats);
-    }).worker();
+    })).worker();
 
-    app.post("/api/images/thumbnail", |ctx| {
+    app.post("/api/images/thumbnail", func_handler(|ctx| {
         let image = ctx.body();
         let thumbnail = generate_thumbnail(image);  // CPU-intensive
         ctx.data("image/jpeg", thumbnail);
-    }).worker();
+    })).worker();
 
-    app.get("/api/reports/generate", |ctx| {
+    app.get("/api/reports/generate", func_handler(|ctx| {
         let params = ctx.query("params");
         let report = generate_report(params);  // CPU-intensive
         try? ctx.json(report);
-    }).worker();
+    })).worker();
 
     try app.run(":8080");
 }
@@ -300,7 +300,7 @@ let config = Config.with_defaults()
 let app = Engine.new(config);
 
 // All routes use spawn mode, .worker() is ignored
-app.get("/compute", |ctx| {
+app.get("/compute", func_handler(|ctx| {
     // Still runs in spawn mode
-}).worker();  // ← Ignored when pool is disabled
+})).worker();  // ← Ignored when pool is disabled
 ```

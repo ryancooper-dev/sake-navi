@@ -6,68 +6,85 @@
 
 Main application entry point.
 
-```navi
+```nv
 pub struct Engine
 ```
 
 #### Methods
 
-##### `new() -> Engine`
+##### `new(config: Config) -> Engine`
 
-Create a new Sake application.
+Create a new Sake application with configuration.
 
-```navi
-let app = Engine.new();
+```nv
+let config = Config.with_defaults();
+let app = Engine.new(config);
 ```
 
-##### `with_workers(count: int) -> Engine`
+##### `with_defaults() -> Engine`
 
-Create application with WorkerPool support.
+Create application with default configuration.
 
-```navi
-let app = Engine.with_workers(4);
+```nv
+let app = Engine.with_defaults();
 ```
 
-##### `get(pattern: string, handler: HandlerFunc) -> Route`
+##### `get(pattern: string, handler: Handler) -> RouteBuilder`
 
 Register GET route.
 
-```navi
-app.get("/users", |ctx| {
-    ctx.json({"users": []});
-});
+```nv
+use sake.{Engine, func_handler};
+
+app.get("/users", func_handler(|ctx| {
+    try? ctx.json({"users": []});
+}));
 ```
 
-##### `post(pattern: string, handler: HandlerFunc) -> Route`
+##### `post(pattern: string, handler: Handler) -> RouteBuilder`
 
 Register POST route.
 
-##### `put(pattern: string, handler: HandlerFunc) -> Route`
+##### `put(pattern: string, handler: Handler) -> RouteBuilder`
 
 Register PUT route.
 
-##### `delete(pattern: string, handler: HandlerFunc) -> Route`
+##### `delete(pattern: string, handler: Handler) -> RouteBuilder`
 
 Register DELETE route.
 
-##### `patch(pattern: string, handler: HandlerFunc) -> Route`
+##### `patch(pattern: string, handler: Handler) -> RouteBuilder`
 
 Register PATCH route.
 
-##### `use(middleware: HandlerFunc)`
+##### `add_middleware(middleware: Handler)`
 
 Add global middleware.
 
-```navi
-app.use(logger());
-app.use(recovery());
+```nv
+use sake.middleware.logger.logger;
+use sake.middleware.recovery.recovery;
+
+app.add_middleware(logger());
+app.add_middleware(recovery());
+```
+
+##### `group(path: string) -> RouterGroup`
+
+Create a route group with common path prefix.
+
+```nv
+let api = app.group("/api");
+api.get("/users", func_handler(|ctx| {
+    try? ctx.json({"users": []});
+}));
 ```
 
 ##### `run(address: string) throws`
 
 Start the HTTP server.
 
-```navi
+```nv
 try app.run(":8080");
 ```
 
@@ -182,12 +199,12 @@ ctx.redirect(302, "/login");
 
 Execute next handler in chain.
 
-```navi
-app.use(|ctx| {
+```nv
+app.add_middleware(func_handler(|ctx| {
     println("Before");
     try ctx.next();
     println("After");
-});
+}));
 ```
 
 ##### `abort()`
@@ -238,31 +255,62 @@ Get int value.
 
 ---
 
-### Route
+### RouteBuilder
 
-Route configuration.
+Route configuration builder.
 
-```navi
-pub struct Route
+```nv
+pub struct RouteBuilder
 ```
 
 #### Methods
 
-##### `worker() -> Route`
+##### `worker() -> RouteBuilder`
 
 Mark route for WorkerPool execution.
 
-```navi
-app.get("/compute", handler).worker();
+```nv
+app.get("/compute", func_handler(|ctx| {
+    // CPU-intensive work
+})).worker();
 ```
 
-##### `use(middleware: HandlerFunc) -> Route`
+##### `add_middleware(middleware: Handler) -> RouteBuilder`
 
 Add route-specific middleware.
 
-```navi
-app.get("/protected", handler)
-    .use(auth_middleware);
+```nv
+app.get("/protected", func_handler(|ctx| {
+    ctx.string("Protected content");
+})).add_middleware(auth_middleware);
+```
+
+##### `with_handler(handler: fn) -> RouteBuilder`
+
+Set handler for worker routes.
+
+```nv
+fn my_handler(ctx: WorkerContext): WorkerResponse throws {
+    return WorkerResponse.json(200, `{"status": "ok"}`);
+}
+
+app.get("/api", func_handler(|ctx| {}))
+    .worker()
+    .with_handler(my_handler);
+```
+
+##### `with_frozen(name: string, frozen: Frozen<T>) -> RouteBuilder throws`
+
+Attach frozen data for worker thread access.
+
+```nv
+use std.sync.freeze;
+
+let config = try freeze(Config { timeout: 30 });
+app.get("/api", func_handler(|ctx| {}))
+    .worker()
+    .with_handler(my_handler)
+    .with_frozen("config", config);
 ```
 
 ---
@@ -299,124 +347,76 @@ Match request to route.
 
 ---
 
-### WorkerPoolConfig
+### Config
 
-WorkerPool configuration (serializable).
+Server configuration.
 
-```navi
-pub struct WorkerPoolConfig
+```nv
+pub struct Config
 ```
 
 #### Methods
 
-##### `new(size: int) -> WorkerPoolConfig`
+##### `with_defaults() -> Config`
 
-Create configuration. Size 0 = auto-detect CPU count.
+Create default configuration.
 
-```navi
-let config = WorkerPoolConfig.new(4);
+```nv
+let config = Config.with_defaults();
 ```
 
-##### `with_queue_size(size: int) -> WorkerPoolConfig`
+##### `with_worker_pool_size(size: int) -> Config`
 
-Set task queue size.
+Set worker pool size. 0 = auto-detect CPU count.
 
-```navi
-config.with_queue_size(1000);
+```nv
+let config = Config.with_defaults()
+    .with_worker_pool_size(4);
 ```
 
-##### `with_timeout(seconds: int) -> WorkerPoolConfig`
+##### `with_worker_pool(enabled: bool) -> Config`
 
-Set task timeout in seconds.
+Enable/disable worker pool.
 
-```navi
-config.with_timeout(30);
+```nv
+let config = Config.with_defaults()
+    .with_worker_pool(false);  // Disable WorkerPool
 ```
 
-##### `with_load_balance(strategy: LoadBalanceStrategy) -> WorkerPoolConfig`
+##### `with_max_connections(max: int) -> Config`
 
-Set load balancing strategy.
+Set maximum concurrent connections.
 
-```navi
-config.with_load_balance(LoadBalanceStrategy.LeastLoaded);
+```nv
+let config = Config.with_defaults()
+    .with_max_connections(10000);
 ```
 
-##### `start() throws -> WorkerPoolRuntime`
+##### `with_request_timeout(timeout_ms: int) -> Config`
 
-Start runtime (creates channels and workers).
+Set request timeout in milliseconds.
 
-```navi
-let runtime = try config.start();
+```nv
+let config = Config.with_defaults()
+    .with_request_timeout(30000);
 ```
 
----
+##### `with_keep_alive(enabled: bool) -> Config`
 
-### WorkerPoolRuntime
+Enable/disable HTTP Keep-Alive.
 
-WorkerPool runtime (contains channels).
-
-```navi
-pub struct WorkerPoolRuntime
+```nv
+let config = Config.with_defaults()
+    .with_keep_alive(true);
 ```
 
-#### Methods
+##### `with_keep_alive_timeout(timeout_ms: int) -> Config`
 
-##### `submit(task_json: string) throws`
+Set keep-alive idle timeout in milliseconds.
 
-Submit task to pool.
-
-```navi
-let task = json.encode({"data": 42});
-try runtime.submit(task);
-```
-
-##### `get_result() throws -> string`
-
-Get next result (blocking).
-
-```navi
-let result = try runtime.get_result();
-```
-
-##### `get_result_timeout(seconds: int) throws -> string?`
-
-Get result with timeout.
-
-```navi
-let result = try runtime.get_result_timeout(30);
-if (result == nil) {
-    // Timeout
-}
-```
-
-##### `size() -> int`
-
-Get number of workers.
-
-##### `is_shutdown() -> bool`
-
-Check if pool is shutting down.
-
-##### `shutdown() throws`
-
-Gracefully shutdown pool.
-
-```navi
-try runtime.shutdown();
-```
-
----
-
-### LoadBalanceStrategy
-
-Load balancing strategy enum.
-
-```navi
-pub enum LoadBalanceStrategy {
-    RoundRobin,
-    LeastLoaded,
-    Random,
-}
+```nv
+let config = Config.with_defaults()
+    .with_keep_alive_timeout(30000);
 ```
 
 ---
@@ -425,50 +425,70 @@ pub enum LoadBalanceStrategy {
 
 ### Built-in Middleware
 
-#### `recovery() -> HandlerFunc`
+#### `recovery() -> Handler`
 
 Catches errors and prevents crashes.
 
-```navi
-use sake.middleware.recovery;
+```nv
+use sake.middleware.recovery.recovery;
 
-app.use(recovery());
+app.add_middleware(recovery());
 ```
 
-#### `logger() -> HandlerFunc`
+#### `recovery_with_config(config: RecoveryConfig) -> Handler`
 
-Logs requests with timing.
+Recovery with custom configuration.
 
-```navi
-use sake.middleware.logger;
+```nv
+use sake.middleware.recovery.{recovery_with_config, RecoveryConfig};
 
-app.use(logger());
+let config = RecoveryConfig.with_defaults().with_details();
+app.add_middleware(recovery_with_config(config));
 ```
 
-#### `logger_colored() -> HandlerFunc`
+#### `logger() -> Handler`
 
-Colored logger output.
+Logs requests with timing and colored output.
 
-#### `cors_default() -> HandlerFunc`
+```nv
+use sake.middleware.logger.logger;
+
+app.add_middleware(logger());
+```
+
+#### `logger_with_config(config: LoggerConfig) -> Handler`
+
+Logger with custom configuration.
+
+```nv
+use sake.middleware.logger.{logger_with_config, LoggerConfig};
+
+let config = LoggerConfig.with_defaults().without_colors();
+app.add_middleware(logger_with_config(config));
+```
+
+#### `cors() -> Handler`
 
 CORS with default (permissive) settings.
 
-```navi
-use sake.middleware.cors;
+```nv
+use sake.middleware.cors.cors;
 
-app.use(cors_default());
+app.add_middleware(cors());
 ```
 
-#### `cors(config: CorsConfig) -> HandlerFunc`
+#### `cors_with_config(config: CorsConfig) -> Handler`
 
 CORS with custom configuration.
 
-```navi
-let config = CorsConfig.restrictive()
-    .allow_origin("https://example.com")
+```nv
+use sake.middleware.cors.{cors_with_config, CorsConfig};
+
+let config = CorsConfig.with_defaults()
+    .with_origins(["https://example.com"])
     .with_credentials();
 
-app.use(cors(config));
+app.add_middleware(cors_with_config(config));
 ```
 
 ---
@@ -477,31 +497,35 @@ app.use(cors(config));
 
 CORS configuration.
 
-```navi
+```nv
 pub struct CorsConfig
 ```
 
 #### Methods
 
-##### `default() -> CorsConfig`
+##### `with_defaults() -> CorsConfig`
 
-Permissive configuration (allows all).
+Create default configuration (allows all origins).
 
-##### `restrictive() -> CorsConfig`
+##### `with_origins(origins: [string]) -> CorsConfig`
 
-Restrictive configuration.
+Set allowed origins.
 
-##### `allow_origin(origin: string) -> CorsConfig`
+##### `with_methods(methods: [string]) -> CorsConfig`
 
-Add allowed origin.
+Set allowed methods.
 
-##### `allow_method(method: string) -> CorsConfig`
+##### `with_headers(headers: [string]) -> CorsConfig`
 
-Add allowed method.
+Set allowed headers.
 
 ##### `with_credentials() -> CorsConfig`
 
 Enable credentials.
+
+##### `with_max_age(seconds: int) -> CorsConfig`
+
+Set preflight cache max age.
 
 ---
 
@@ -619,17 +643,27 @@ Build complete HTTP response string.
 
 ---
 
-## Type Aliases
+## Types
 
-### HandlerFunc
+### Handler
 
-Handler function type.
+Handler interface for request handlers.
 
-```navi
-pub type HandlerFunc = |(ctx: Context) throws|;
+```nv
+pub interface Handler {
+    fn handle(self, ctx: Context) throws;
+}
 ```
 
-All handlers and middleware use this signature.
+Use `func_handler()` to wrap closures:
+
+```nv
+use sake.func_handler;
+
+let handler = func_handler(|ctx| {
+    ctx.string("Hello!");
+});
+```
 
 ---
 
@@ -637,15 +671,15 @@ All handlers and middleware use this signature.
 
 ### Basic Server
 
-```navi
-use sake.Engine;
+```nv
+use sake.{Engine, func_handler};
 
 fn main() throws {
-    let app = Engine.new();
+    let app = Engine.with_defaults();
 
-    app.get("/", |ctx| {
-        ctx.json({"message": "Hello!"});
-    });
+    app.get("/", func_handler(|ctx| {
+        try? ctx.json({"message": "Hello!"});
+    }));
 
     try app.run(":8080");
 }
@@ -653,17 +687,20 @@ fn main() throws {
 
 ### With WorkerPool
 
-```navi
-use sake.Engine;
+```nv
+use sake.{Engine, Config, func_handler};
 
 fn main() throws {
-    let app = Engine.with_workers(4);
+    let config = Config.with_defaults()
+        .with_worker_pool_size(4);
 
-    app.get("/compute/:n", |ctx| {
-        let n = ctx.param("n") || "0";
+    let app = Engine.new(config);
+
+    app.get("/compute/:n", func_handler(|ctx| {
+        let n = ctx.param("n")?.parse::<int>() ?? 0;
         let result = fibonacci(n);
-        ctx.json({"result": result});
-    }).worker();
+        try? ctx.json({"result": result});
+    })).worker();
 
     try app.run(":8080");
 }
@@ -671,20 +708,22 @@ fn main() throws {
 
 ### With Middleware
 
-```navi
-use sake.Engine;
-use sake.middleware.{recovery, logger, cors_default};
+```nv
+use sake.{Engine, func_handler};
+use sake.middleware.recovery.recovery;
+use sake.middleware.logger.logger;
+use sake.middleware.cors.cors;
 
 fn main() throws {
-    let app = Engine.new();
+    let app = Engine.with_defaults();
 
-    app.use(recovery());
-    app.use(logger());
-    app.use(cors_default());
+    app.add_middleware(recovery());
+    app.add_middleware(logger());
+    app.add_middleware(cors());
 
-    app.get("/", |ctx| {
+    app.get("/", func_handler(|ctx| {
         ctx.string("OK");
-    });
+    }));
 
     try app.run(":8080");
 }
@@ -692,35 +731,46 @@ fn main() throws {
 
 ### Route Middleware
 
-```navi
-let auth = |ctx: Context| {
-    let token = ctx.header("Authorization");
-    if (token == nil) {
-        ctx.abort_with_status(401);
-        return;
-    }
-    try ctx.next();
-};
+```nv
+use sake.{Engine, func_handler};
 
-app.get("/protected", |ctx| {
-    ctx.string("Secret data");
-}).use(auth);
+fn main() throws {
+    let app = Engine.with_defaults();
+
+    let auth = func_handler(|ctx| {
+        let token = ctx.header("Authorization");
+        if (token == nil) {
+            ctx.abort_with_status(401);
+            return;
+        }
+        try ctx.next();
+    });
+
+    app.get("/protected", func_handler(|ctx| {
+        ctx.string("Secret data");
+    })).add_middleware(auth);
+
+    try app.run(":8080");
+}
 ```
 
 ### Custom Configuration
 
-```navi
-use sake.Engine;
-use worker_pool.{WorkerPoolConfig, LoadBalanceStrategy};
+```nv
+use sake.{Engine, Config, func_handler};
 
 fn main() throws {
-    let pool_config = WorkerPoolConfig.new(8)
-        .with_timeout(60)
-        .with_queue_size(2000)
-        .with_load_balance(LoadBalanceStrategy.LeastLoaded);
+    let config = Config.with_defaults()
+        .with_worker_pool_size(8)
+        .with_max_connections(10000)
+        .with_request_timeout(60000)
+        .with_keep_alive(true);
 
-    let app = Engine.new()
-        .set_worker_pool(pool_config);
+    let app = Engine.new(config);
+
+    app.get("/", func_handler(|ctx| {
+        ctx.string("OK");
+    }));
 
     try app.run(":8080");
 }
