@@ -71,8 +71,8 @@ let config = Config.default()
     .with_worker_pool_size(8)       // 8 worker threads (0 = auto-detect)
     .with_max_connections(10000)    // Max concurrent connections
     .with_request_timeout(30000)    // 30 second timeout
-    .with_keep_alive(true)          // Enable Keep-Alive (default)
-    .with_keep_alive_timeout(5000); // 5 second idle timeout
+    .with_keep_alive(true)           // Enable Keep-Alive (default)
+    .with_keep_alive_timeout(30000); // 30 second idle timeout (default)
 
 let app = Engine.new(config);
 ```
@@ -84,7 +84,8 @@ let app = Engine.new(config);
 - `max_connections` - Maximum concurrent connections (default: 10000)
 - `request_timeout` - Request timeout in milliseconds (default: 30000)
 - `enable_keep_alive` - Enable HTTP Keep-Alive connection reuse (default: true)
-- `keep_alive_timeout` - Keep-Alive idle timeout in milliseconds (default: 5000)
+- `keep_alive_timeout` - Keep-Alive idle timeout in milliseconds (default: 30000)
+- `max_requests_per_connection` - Max requests per Keep-Alive connection (default: 100)
 
 ## 📖 Documentation
 
