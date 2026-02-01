@@ -5,11 +5,11 @@ Middleware intercepts requests before and after handlers.
 ## Basic Middleware
 
 ```nv
-app.add_middleware(|ctx| {
+app.add_middleware(func_handler(|ctx| {
     println("Before request");
     try ctx.next();
     println("After request");
-});
+}));
 ```
 
 ## Calling Next
@@ -17,7 +17,7 @@ app.add_middleware(|ctx| {
 Always call `ctx.next()` to continue the chain:
 
 ```nv
-app.add_middleware(|ctx| {
+app.add_middleware(func_handler(|ctx| {
     // Pre-processing
     let start = time.now();
 
@@ -26,7 +26,7 @@ app.add_middleware(|ctx| {
     // Post-processing
     let duration = time.now() - start;
     println(`Request took ${duration}ms`);
-});
+}));
 ```
 
 ## Early Return
@@ -34,7 +34,7 @@ app.add_middleware(|ctx| {
 Skip remaining handlers by not calling `next()`:
 
 ```nv
-fn auth_middleware(ctx: Context) throws {
+let auth_middleware = func_handler(|ctx| {
     let token = ctx.header("Authorization");
 
     if (token == nil) {
@@ -44,7 +44,7 @@ fn auth_middleware(ctx: Context) throws {
     }
 
     try ctx.next();
-}
+});
 ```
 
 ## Middleware Order
@@ -87,20 +87,20 @@ api.add_middleware(rate_limit);
 ### Logger
 
 ```nv
-fn logger(ctx: Context) throws {
+let logger = func_handler(|ctx| {
     let method = ctx.request.method;
     let path = ctx.request.path;
     println(`${method} ${path}`);
     try ctx.next();
-}
+});
 ```
 
 ### CORS
 
 ```nv
-fn cors(ctx: Context) throws {
-    ctx.header("Access-Control-Allow-Origin", "*");
-    ctx.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE");
+let cors = func_handler(|ctx| {
+    ctx.set_header("Access-Control-Allow-Origin", "*");
+    ctx.set_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE");
 
     if (ctx.request.method == "OPTIONS") {
         ctx.status(204);
@@ -108,18 +108,18 @@ fn cors(ctx: Context) throws {
     }
 
     try ctx.next();
-}
+});
 ```
 
 ### Recovery
 
 ```nv
-fn recovery(ctx: Context) throws {
+let recovery = func_handler(|ctx| {
     do {
         try ctx.next();
     } catch (e) {
         ctx.status(500);
-        ctx.json({"error": "Internal Server Error"});
+        try? ctx.json({"error": "Internal Server Error"});
     }
-}
+});
 ```

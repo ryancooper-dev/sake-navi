@@ -5,14 +5,14 @@ Sake is a lightweight web framework for [Navi](https://navi-lang.org). It provid
 ## Quick Start
 
 ```nv
-use sake.Engine;
+use sake.{Engine, func_handler};
 
 fn main() throws {
-    let app = Engine.default();
+    let app = Engine.with_defaults();
 
-    app.get("/", |ctx| {
+    app.get("/", func_handler(|ctx| {
         ctx.string("Hello, Sake.");
-    });
+    }));
 
     try app.run(":8080");
 }
@@ -42,10 +42,10 @@ app.delete("/users/:id", handler); // DELETE
 Capture dynamic segments with `:param` syntax:
 
 ```nv
-app.get("/users/:id", |ctx| {
+app.get("/users/:id", func_handler(|ctx| {
     let id = ctx.param("id");
     try? ctx.json({"user_id": id});
-});
+}));
 ```
 
 ## JSON Responses
@@ -53,12 +53,12 @@ app.get("/users/:id", |ctx| {
 Return JSON with type inference:
 
 ```nv
-app.get("/api/status", |ctx| {
+app.get("/api/status", func_handler(|ctx| {
     try? ctx.json({
         "status": "ok",
         "version": "1.0.0"
     });
-});
+}));
 ```
 
 ## Query Parameters
@@ -67,11 +67,11 @@ Access query strings:
 
 ```nv
 // GET /search?q=navi&limit=10
-app.get("/search", |ctx| {
+app.get("/search", func_handler(|ctx| {
     let query = ctx.query("q") ?? "";
     let limit = ctx.query("limit") ?? "10";
     // ...
-});
+}));
 ```
 
 ## Next Steps

@@ -17,16 +17,16 @@ app.head("/users", handler);
 Capture dynamic segments:
 
 ```nv
-app.get("/users/:id", |ctx| {
+app.get("/users/:id", func_handler(|ctx| {
     let id = ctx.param("id");
     // ...
-});
+}));
 
-app.get("/posts/:post_id/comments/:comment_id", |ctx| {
+app.get("/posts/:post_id/comments/:comment_id", func_handler(|ctx| {
     let post_id = ctx.param("post_id");
     let comment_id = ctx.param("comment_id");
     // ...
-});
+}));
 ```
 
 ## Wildcards
@@ -34,10 +34,10 @@ app.get("/posts/:post_id/comments/:comment_id", |ctx| {
 Match any path suffix with `*`:
 
 ```nv
-app.get("/static/*filepath", |ctx| {
+app.get("/static/*filepath", func_handler(|ctx| {
     let path = ctx.param("filepath");
     // /static/css/main.css → path = "css/main.css"
-});
+}));
 ```
 
 ## Route Groups
@@ -70,7 +70,7 @@ admin.get("/settings", settings);     // Protected
 Match all HTTP methods:
 
 ```nv
-app.any("/ping", |ctx| {
+app.any("/ping", func_handler(|ctx| {
     ctx.string("pong");
-});
+}));
 ```

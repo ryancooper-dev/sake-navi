@@ -8,7 +8,7 @@ The `Context` object provides access to request data and response methods.
 
 ```nv
 // GET /users/123
-let id = ctx.param("id");  // "123"
+let id = ctx.param("id");  // "123"?
 ```
 
 ### Query Parameters
@@ -71,21 +71,21 @@ ctx.string("Created");
 ### Headers
 
 ```nv
-ctx.header("X-Custom", "value");
-ctx.header("Cache-Control", "no-cache");
+ctx.set_header("X-Custom", "value");
+ctx.set_header("Cache-Control", "no-cache");
 ```
 
 ### Redirect
 
 ```nv
-try ctx.redirect("/new-location");
-try ctx.redirect_permanent("/moved");
+ctx.redirect(302, "/new-location");
+ctx.redirect(301, "/moved-permanently");
 ```
 
 ### Binary Data
 
 ```nv
-ctx.data("application/octet-stream", bytes);
+ctx.data("application/octet-stream", data);
 ```
 
 ### HTML
@@ -138,7 +138,7 @@ if (!is_authenticated) {
 ## Full Example
 
 ```nv
-app.post("/users", |ctx| {
+app.post("/users", func_handler(|ctx| {
     // Validate content type
     let ct = ctx.header("Content-Type") ?? "";
     if (!ct.starts_with("application/json")) {
@@ -154,7 +154,7 @@ app.post("/users", |ctx| {
 
     // Response
     ctx.status(201);
-    ctx.header("Location", `/users/${id}`);
+    ctx.set_header("Location", `/users/${id}`);
     try ctx.json({"id": id});
-});
+}));
 ```

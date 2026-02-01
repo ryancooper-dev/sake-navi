@@ -45,19 +45,19 @@ features:
 <div style="max-width: 680px; margin: 0 auto; padding: 0 24px;">
 
 ```nv
-use sake.Engine;
+use sake.{Engine, func_handler};
 
 fn main() throws {
-    let app = Engine.default();
+    let app = Engine.with_defaults();
 
-    app.get("/", |ctx| {
+    app.get("/", func_handler(|ctx| {
         ctx.string("Hello, Sake.");
-    });
+    }));
 
-    app.get("/api/users/:id", |ctx| {
+    app.get("/api/users/:id", func_handler(|ctx| {
         let id = ctx.param("id");
         try? ctx.json({"id": id});
-    });
+    }));
 
     try app.run(":8080");
 }

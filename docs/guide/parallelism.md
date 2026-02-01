@@ -14,10 +14,10 @@ Sake offers two execution modes for different workloads.
 Default mode. Uses Navi's cooperative concurrency.
 
 ```nv
-app.get("/api/users", |ctx| {
+app.get("/api/users", func_handler(|ctx| {
     let users = db.query("SELECT * FROM users");
     try? ctx.json(users);
-});
+}));
 ```
 
 Good for:
@@ -31,11 +31,11 @@ Good for:
 For CPU-intensive routes. Mark with `.worker()`:
 
 ```nv
-app.get("/compute/:n", |ctx| {
+app.get("/compute/:n", func_handler(|ctx| {
     let n = ctx.param("n")?.parse::<int>() ?? 10;
     let result = fibonacci(n);  // CPU-bound
     try? ctx.json({"result": result});
-}).worker();
+})).worker();
 ```
 
 Good for:
@@ -47,7 +47,7 @@ Good for:
 ## Configuration
 
 ```nv
-let config = Config.default()
+let config = Config.with_defaults()
     .with_worker_pool(true)      // Enable WorkerPool
     .with_worker_pool_size(8);   // 8 threads (0 = auto-detect)
 
@@ -86,16 +86,16 @@ Use both in the same app:
 
 ```nv
 // I/O-bound: uses spawn (default)
-app.get("/api/users", |ctx| {
+app.get("/api/users", func_handler(|ctx| {
     let users = db.query("...");
     try? ctx.json(users);
-});
+}));
 
 // CPU-bound: uses WorkerPool
-app.get("/render/:id", |ctx| {
+app.get("/render/:id", func_handler(|ctx| {
     let image = render_image(id);
     ctx.data("image/png", image);
-}).worker();
+})).worker();
 ```
 
 ## Performance
@@ -112,7 +112,7 @@ Spawn mode is faster for I/O-bound work. Use WorkerPool only when you need true 
 If all your routes are I/O-bound:
 
 ```nv
-let config = Config.default()
+let config = Config.with_defaults()
     .with_worker_pool(false);  // Disable WorkerPool entirely
 ```
 

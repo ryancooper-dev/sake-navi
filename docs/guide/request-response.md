@@ -72,9 +72,9 @@ ctx.status(500);  // Internal Server Error
 ### Headers
 
 ```nv
-ctx.header("Content-Type", "text/plain");
-ctx.header("X-Request-Id", request_id);
-ctx.header("Cache-Control", "max-age=3600");
+ctx.set_header("Content-Type", "text/plain");
+ctx.set_header("X-Request-Id", request_id);
+ctx.set_header("Cache-Control", "max-age=3600");
 ```
 
 ### Body
@@ -99,14 +99,14 @@ ctx.html("<h1>Welcome</h1>");
 
 **Binary:**
 ```nv
-ctx.data("image/png", image_bytes);
+ctx.data("image/png", image_data);
 ```
 
 ### Redirect
 
 ```nv
-try ctx.redirect("/new-path");          // 302 Found
-try ctx.redirect_permanent("/moved");   // 301 Moved Permanently
+ctx.redirect(302, "/new-path");   // 302 Found
+ctx.redirect(301, "/moved");      // 301 Moved Permanently
 ```
 
 ### Cookies
@@ -134,7 +134,7 @@ ctx.delete_cookie("session");
 ## Complete Example
 
 ```nv
-app.post("/api/login", |ctx| {
+app.post("/api/login", func_handler(|ctx| {
     // Parse request
     let creds = try ctx.bind_json::<Credentials>();
 
@@ -163,5 +163,5 @@ app.post("/api/login", |ctx| {
         "user": user!.name,
         "message": "Logged in"
     });
-});
+}));
 ```

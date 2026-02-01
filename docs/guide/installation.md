@@ -18,14 +18,14 @@ sake = "0.1"
 Create a minimal server:
 
 ```nv
-use sake.Engine;
+use sake.{Engine, func_handler};
 
 fn main() throws {
-    let app = Engine.default();
+    let app = Engine.with_defaults();
 
-    app.get("/", |ctx| {
+    app.get("/", func_handler(|ctx| {
         ctx.string("It works.");
-    });
+    }));
 
     try app.run(":8080");
 }
