@@ -1,0 +1,346 @@
+/**
+ * Sake Theme
+ *
+ * Inspired by Japanese aesthetics:
+ * - 間 (Ma) - Negative space, breathing room
+ * - 侘寂 (Wabi-sabi) - Beauty in simplicity
+ * - 渋い (Shibui) - Subtle, unobtrusive elegance
+ */
+
+:root {
+  /* Colors - Warm, natural tones */
+  --vp-c-brand-1: #8b7355;
+  --vp-c-brand-2: #a08060;
+  --vp-c-brand-3: #6b5344;
+  --vp-c-brand-soft: rgba(139, 115, 85, 0.14);
+
+  /* Typography */
+  --vp-font-family-base: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --vp-font-family-mono: 'JetBrains Mono', 'Fira Code', monospace;
+
+  /* Subtle backgrounds */
+  --vp-c-bg: #fafaf9;
+  --vp-c-bg-alt: #f5f5f4;
+  --vp-c-bg-soft: #fafaf9;
+
+  /* Borders - barely there */
+  --vp-c-border: rgba(0, 0, 0, 0.06);
+  --vp-c-divider: rgba(0, 0, 0, 0.04);
+
+  /* Home hero gradient */
+  --vp-home-hero-name-color: transparent;
+  --vp-home-hero-name-background: linear-gradient(135deg, #1a1a1a 0%, #4a4a4a 100%);
+  --vp-home-hero-image-background-image: radial-gradient(circle, rgba(139, 115, 85, 0.08) 0%, transparent 70%);
+  --vp-home-hero-image-filter: none;
+}
+
+.dark {
+  --vp-c-bg: #0a0a0a;
+  --vp-c-bg-alt: #111111;
+  --vp-c-bg-soft: #0f0f0f;
+  --vp-c-border: rgba(255, 255, 255, 0.06);
+  --vp-c-divider: rgba(255, 255, 255, 0.04);
+
+  --vp-home-hero-name-background: linear-gradient(135deg, #ffffff 0%, #a0a0a0 100%);
+  --vp-home-hero-image-background-image: radial-gradient(circle, rgba(139, 115, 85, 0.12) 0%, transparent 70%);
+}
+
+/* === Layout: More breathing room === */
+
+.VPContent {
+  padding-top: 2rem;
+}
+
+.VPDoc .container {
+  max-width: 780px;
+}
+
+.vp-doc h1,
+.vp-doc h2,
+.vp-doc h3 {
+  letter-spacing: -0.02em;
+  font-weight: 600;
+}
+
+.vp-doc h1 {
+  font-size: 2.25rem;
+  margin-top: 3rem;
+  margin-bottom: 1.5rem;
+}
+
+.vp-doc h2 {
+  margin-top: 3rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--vp-c-divider);
+}
+
+.vp-doc p {
+  line-height: 1.8;
+  color: var(--vp-c-text-2);
+}
+
+/* === Home Page === */
+
+.VPHome {
+  padding-bottom: 6rem;
+}
+
+.VPHero {
+  padding: 6rem 0 4rem;
+}
+
+.VPHero .name {
+  font-size: 3.5rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+}
+
+.VPHero .text {
+  font-size: 1.25rem;
+  color: var(--vp-c-text-2);
+  font-weight: 400;
+  max-width: 500px;
+  line-height: 1.6;
+}
+
+.VPHero .tagline {
+  font-size: 1rem;
+  color: var(--vp-c-text-3);
+  max-width: 460px;
+}
+
+/* Subtle hero image glow */
+.VPHero .image-bg {
+  opacity: 0.5;
+  transition: opacity 0.5s ease;
+}
+
+.VPHero:hover .image-bg {
+  opacity: 0.7;
+}
+
+/* === Buttons: Refined === */
+
+.VPButton {
+  border-radius: 6px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  transition: all 0.2s ease;
+}
+
+.VPButton.brand {
+  background: #1a1a1a;
+  border-color: #1a1a1a;
+}
+
+.dark .VPButton.brand {
+  background: #ffffff;
+  border-color: #ffffff;
+  color: #0a0a0a;
+}
+
+.VPButton.brand:hover {
+  background: #333333;
+  border-color: #333333;
+}
+
+.dark .VPButton.brand:hover {
+  background: #e0e0e0;
+  border-color: #e0e0e0;
+}
+
+.VPButton.alt {
+  background: transparent;
+  border-color: var(--vp-c-border);
+}
+
+.VPButton.alt:hover {
+  border-color: var(--vp-c-text-3);
+}
+
+/* === Features: Clean grid === */
+
+.VPFeatures {
+  padding: 4rem 0;
+}
+
+.VPFeature {
+  background: transparent;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 8px;
+  padding: 1.75rem;
+  transition: border-color 0.2s ease;
+}
+
+.VPFeature:hover {
+  border-color: var(--vp-c-border);
+}
+
+.VPFeature .icon {
+  font-size: 1.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.VPFeature .title {
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.VPFeature .details {
+  font-size: 0.875rem;
+  color: var(--vp-c-text-2);
+  line-height: 1.6;
+}
+
+/* === Code blocks: Subtle === */
+
+.vp-doc div[class*='language-'] {
+  border-radius: 8px;
+  border: 1px solid var(--vp-c-divider);
+  background: var(--vp-c-bg-alt);
+}
+
+.vp-doc div[class*='language-'] > button.copy {
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.vp-doc div[class*='language-']:hover > button.copy {
+  opacity: 0.6;
+}
+
+.vp-doc div[class*='language-'] > button.copy:hover {
+  opacity: 1;
+}
+
+/* Code: Slightly smaller, refined */
+.vp-doc :not(pre) > code {
+  background: var(--vp-c-bg-alt);
+  border-radius: 4px;
+  padding: 0.2em 0.4em;
+  font-size: 0.9em;
+  border: 1px solid var(--vp-c-divider);
+}
+
+/* === Navigation: Minimal === */
+
+.VPNav {
+  border-bottom: 1px solid var(--vp-c-divider);
+  background: var(--vp-c-bg);
+}
+
+.VPNavBar .title {
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.VPNavBarMenuLink {
+  font-weight: 500;
+  font-size: 0.9rem;
+}
+
+/* === Sidebar: Light touch === */
+
+.VPSidebar {
+  background: transparent;
+  border-right: 1px solid var(--vp-c-divider);
+}
+
+.VPSidebarItem .text {
+  font-size: 0.875rem;
+}
+
+.VPSidebarItem.is-active > .item > .link > .text {
+  color: var(--vp-c-brand-1);
+}
+
+/* === Footer: Subtle === */
+
+.VPFooter {
+  border-top: 1px solid var(--vp-c-divider);
+  background: transparent;
+}
+
+.VPFooter .message,
+.VPFooter .copyright {
+  font-size: 0.8rem;
+  color: var(--vp-c-text-3);
+}
+
+/* === Custom: Sake-specific === */
+
+/* Performance badge */
+.perf-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background: var(--vp-c-bg-alt);
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 100px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--vp-c-text-2);
+  margin-top: 1.5rem;
+}
+
+.perf-badge strong {
+  color: var(--vp-c-text-1);
+}
+
+/* Subtle divider */
+.subtle-divider {
+  width: 40px;
+  height: 1px;
+  background: var(--vp-c-divider);
+  margin: 3rem auto;
+}
+
+/* Quote style */
+.vp-doc blockquote {
+  border-left: 2px solid var(--vp-c-divider);
+  padding-left: 1rem;
+  color: var(--vp-c-text-2);
+  font-style: normal;
+}
+
+/* Table refinement */
+.vp-doc table {
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.vp-doc th {
+  background: var(--vp-c-bg-alt);
+  font-weight: 600;
+  font-size: 0.875rem;
+}
+
+.vp-doc td {
+  font-size: 0.875rem;
+}
+
+/* === Animations: Subtle === */
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.VPHero .container {
+  animation: fadeIn 0.6s ease-out;
+}
+
+.VPFeature {
+  animation: fadeIn 0.6s ease-out backwards;
+}
+
+.VPFeature:nth-child(1) { animation-delay: 0.1s; }
+.VPFeature:nth-child(2) { animation-delay: 0.15s; }
+.VPFeature:nth-child(3) { animation-delay: 0.2s; }
+.VPFeature:nth-child(4) { animation-delay: 0.25s; }
+.VPFeature:nth-child(5) { animation-delay: 0.3s; }
+.VPFeature:nth-child(6) { animation-delay: 0.35s; }
