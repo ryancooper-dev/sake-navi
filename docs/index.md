@@ -2,8 +2,8 @@
 layout: home
 
 hero:
-  name: Sake
-  text: Web framework for Navi
+  name: Web framework for Navi
+  text: ""
   tagline: Simple. Fast. Refined.
   actions:
     - theme: brand
