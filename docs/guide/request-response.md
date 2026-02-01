@@ -5,9 +5,9 @@
 ### Properties
 
 ```nv
-ctx.request.method   // "GET", "POST", etc.
-ctx.request.path     // "/users/123"
-ctx.request.version  // "HTTP/1.1"
+ctx.method()   // "GET", "POST", etc.
+ctx.path()     // "/users/123"
+ctx.uri()      // "/users/123?page=1" (includes query string)
 ```
 
 ### Path Parameters

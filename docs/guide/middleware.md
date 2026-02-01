@@ -88,8 +88,8 @@ api.add_middleware(rate_limit);
 
 ```nv
 let logger = func_handler(|ctx| {
-    let method = ctx.request.method;
-    let path = ctx.request.path;
+    let method = ctx.method();
+    let path = ctx.path();
     println(`${method} ${path}`);
     try ctx.next();
 });
@@ -102,7 +102,7 @@ let cors = func_handler(|ctx| {
     ctx.set_header("Access-Control-Allow-Origin", "*");
     ctx.set_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE");
 
-    if (ctx.request.method == "OPTIONS") {
+    if (ctx.method() == "OPTIONS") {
         ctx.status(204);
         return;
     }
