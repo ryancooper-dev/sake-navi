@@ -21,6 +21,11 @@ export default defineConfig({
       { text: 'Guide', link: '/guide/getting-started' },
       { text: 'API', link: '/api/engine' },
       { text: 'Examples', link: '/examples' },
+      {
+        text: 'Navi',
+        link: 'https://navi-lang.org',
+        target: '_blank',
+      },
     ],
 
     sidebar: {
@@ -69,7 +74,7 @@ export default defineConfig({
     ],
 
     footer: {
-      message: 'Released under the MIT License.',
+      message: 'Released under the MIT License. Built for <a href="https://navi-lang.org" target="_blank">Navi</a>.',
       copyright: 'Copyright © 2024'
     },
 
