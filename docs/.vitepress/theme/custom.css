@@ -165,25 +165,27 @@
   padding: 4rem 0;
 }
 
-.VPFeature {
-  background: #f0eeec;
-  border: 1px solid #e0ddd9;
-  border-radius: 8px;
-  padding: 1.75rem;
-  transition: all 0.2s ease;
+.VPFeatures .VPFeature,
+.VPFeature .box {
+  background: #f0eeec !important;
+  border: 1px solid #e0ddd9 !important;
+  border-radius: 12px !important;
 }
 
-.dark .VPFeature {
-  background: #1a1a1a;
-  border: 1px solid #2a2a2a;
+.dark .VPFeatures .VPFeature,
+.dark .VPFeature .box {
+  background: #1a1a1a !important;
+  border: 1px solid #2a2a2a !important;
 }
 
-.VPFeature:hover {
-  border-color: #c0bdb9;
+.VPFeatures .VPFeature:hover,
+.VPFeature:hover .box {
+  border-color: #c0bdb9 !important;
 }
 
-.dark .VPFeature:hover {
-  border-color: #3a3a3a;
+.dark .VPFeatures .VPFeature:hover,
+.dark .VPFeature:hover .box {
+  border-color: #3a3a3a !important;
 }
 
 .VPFeature .icon {
