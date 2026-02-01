@@ -1,0 +1,12 @@
+<svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Bento box - minimal grid -->
+  <rect x="6" y="10" width="36" height="28" rx="3" stroke="currentColor" stroke-width="2.5" fill="none"/>
+  <!-- Dividers -->
+  <path d="M6 24 L42 24" stroke="currentColor" stroke-width="2"/>
+  <path d="M24 10 L24 24" stroke="currentColor" stroke-width="2"/>
+  <!-- Small items hint -->
+  <circle cx="15" cy="17" r="3" stroke="currentColor" stroke-width="1.5" fill="none"/>
+  <circle cx="33" cy="17" r="3" stroke="currentColor" stroke-width="1.5" fill="none"/>
+  <path d="M15 31 L33 31" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+  <path d="M15 35 L27 35" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+</svg>

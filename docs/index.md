@@ -14,22 +14,28 @@ hero:
       link: https://github.com/pnowak-dev/sake-navi
 
 features:
-  - icon: 🐉
+  - icon:
+      src: /icons/fast.svg
     title: Fast
     details: 45,000+ requests per second with Keep-Alive. Built on Navi's async I/O.
-  - icon: 🎋
+  - icon:
+      src: /icons/simple.svg
     title: Simple
     details: Gin-inspired API. If you know Gin, you know Sake.
-  - icon: ☯️
+  - icon:
+      src: /icons/concurrent.svg
     title: Concurrent
     details: spawn for I/O-bound, WorkerPool for CPU-bound. Choose per route.
-  - icon: 🏯
+  - icon:
+      src: /icons/typesafe.svg
     title: Type-Safe
     details: Full Navi type safety. Optional types, no null pointer exceptions.
-  - icon: 🧧
+  - icon:
+      src: /icons/middleware.svg
     title: Middleware
     details: Composable middleware chain with ctx.next().
-  - icon: 🥡
+  - icon:
+      src: /icons/batteries.svg
     title: Batteries Included
     details: JSON, cookies, path params, query strings, form data.
 ---

@@ -1,0 +1,11 @@
+<svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Bamboo - single stalk, minimal -->
+  <path d="M24 6 L24 42" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M24 14 L32 10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+  <path d="M24 24 L16 20" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+  <path d="M24 34 L32 30" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+  <!-- Nodes -->
+  <circle cx="24" cy="14" r="1.5" fill="currentColor"/>
+  <circle cx="24" cy="24" r="1.5" fill="currentColor"/>
+  <circle cx="24" cy="34" r="1.5" fill="currentColor"/>
+</svg>

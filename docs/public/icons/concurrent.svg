@@ -1,0 +1,6 @@
+<svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Flowing water/waves - Japanese style -->
+  <path d="M6 18 Q12 12, 18 18 T30 18 T42 18" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" fill="none"/>
+  <path d="M6 28 Q12 22, 18 28 T30 28 T42 28" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" fill="none"/>
+  <path d="M6 38 Q12 32, 18 38 T30 38 T42 38" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" fill="none"/>
+</svg>

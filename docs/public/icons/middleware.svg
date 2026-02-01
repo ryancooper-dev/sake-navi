@@ -1,0 +1,10 @@
+<svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Torii gate - minimal -->
+  <!-- Top beam -->
+  <path d="M6 10 L42 10" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+  <!-- Second beam -->
+  <path d="M10 18 L38 18" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+  <!-- Pillars -->
+  <path d="M12 10 L12 44" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M36 10 L36 44" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+</svg>

@@ -1,0 +1,6 @@
+<svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Wind/speed lines - minimalist -->
+  <path d="M8 16 H28 C34 16 34 24 28 24 H12" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M8 24 H20" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M8 32 H32 C38 32 38 40 32 40 H16" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+</svg>
