@@ -1,81 +1,149 @@
 # Response
 
-HTTP response builder.
+Build HTTP responses through Context methods.
 
-## Constructor
+## Status Code
 
-### `Response.new()`
-
-Create empty response.
+Set response status code.
 
 ```nv
-let response = Response.new();
+ctx.status(200);  // OK
+ctx.status(201);  // Created
+ctx.status(404);  // Not Found
+ctx.status(500);  // Internal Server Error
 ```
 
-### `Response.not_found()`
+## Headers
 
-Create 404 response.
+Set response headers.
 
 ```nv
-let response = Response.not_found();
+ctx.set_header("Content-Type", "text/plain");
+ctx.set_header("X-Request-Id", request_id);
+ctx.set_header("Cache-Control", "max-age=3600");
 ```
 
-## Methods
+## Body
 
-### `status(code: int)`
-
-Set status code.
+### Plain Text
 
 ```nv
-response.status(200);
-response.status(201);
-response.status(404);
+ctx.string("Hello, World!");
 ```
 
-### `header(name: string, value: string)`
-
-Set response header.
+### JSON
 
 ```nv
-response.header("Content-Type", "application/json");
-response.header("Cache-Control", "no-cache");
+try ctx.json({
+    "status": "ok",
+    "data": items
+});
 ```
 
-### `write(body: string)`
-
-Set response body.
+### HTML
 
 ```nv
-response.write("{\"status\": \"ok\"}");
+ctx.html("<h1>Welcome</h1>");
 ```
 
-### `build(): string`
-
-Build complete HTTP response string.
+### XML
 
 ```nv
-let http_response = response.build();
-// "HTTP/1.1 200 OK\r\nContent-Type: ...\r\n\r\n{...}"
+ctx.xml("<user><name>Alice</name></user>");
 ```
 
-### `send(stream: Connection)`
-
-Send response to connection.
+### YAML
 
 ```nv
-try response.send(stream);
+ctx.yaml("name: Alice\nage: 30\n");
 ```
 
-## Properties
-
-### `status_code: int`
-
-Current status code.
+### Binary Data
 
 ```nv
-let code = response.status_code;  // 200
+ctx.data("image/png", image_data);
 ```
 
-### `headers: <string, string>{}`
+## File Responses
 
-Response headers map.
+### Send File
+
+```nv
+try ctx.file("./static/image.png");
+```
+
+### Download
+
+```nv
+try ctx.download("./reports/data.csv", "report-2024.csv");
+```
+
+## Redirect
+
+```nv
+ctx.redirect(302, "/new-path");   // 302 Found
+ctx.redirect(301, "/moved");      // 301 Moved Permanently
+```
+
+## Cookies
+
+### Set Cookie
+
+```nv
+ctx.set_cookie("theme", "dark");
+```
+
+### Set Cookie with Options
+
+```nv
+ctx.set_cookie_advanced("session", token,
+    86400,     // max_age: 1 day
+    "/",       // path
+    nil,       // domain
+    true,      // secure
+    true       // http_only
+);
+```
+
+## Abort
+
+### Stop Handler Chain
+
+```nv
+ctx.abort();
+```
+
+### Abort with Status
+
+```nv
+ctx.abort_with_status(401);
+```
+
+### Abort with Error
+
+```nv
+ctx.abort_with_error(404, "Resource not found");
+```
+
+## Complete Example
+
+```nv
+app.post("/api/users", func_handler(|ctx| {
+    // Validate
+    let ct = ctx.content_type() ?? "";
+    if (!ct.contains("application/json")) {
+        ctx.status(415);
+        try ctx.json({"error": "Unsupported Media Type"});
+        return;
+    }
+
+    // Process
+    let user = try ctx.bind_json::<CreateUser>();
+    let id = save_user(user);
+
+    // Respond
+    ctx.status(201);
+    ctx.set_header("Location", `/api/users/${id}`);
+    try ctx.json({"id": id, "created": true});
+}));
+```
