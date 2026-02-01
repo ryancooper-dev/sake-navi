@@ -2,3 +2,8 @@
 .dark .VPFeature .VPImage {
   filter: invert(1);
 }
+
+/* Prevent hero title from wrapping */
+.VPHero .name {
+  white-space: nowrap;
+}
