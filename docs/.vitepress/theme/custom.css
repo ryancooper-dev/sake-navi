@@ -167,8 +167,8 @@
 
 .VPFeatures .VPFeature,
 .VPFeature .box {
-  background: #f0eeec !important;
-  border: 1px solid #e0ddd9 !important;
+  background: #f8f7f6 !important;
+  border: 1px solid #eae8e6 !important;
   border-radius: 12px !important;
 }
 
@@ -180,7 +180,7 @@
 
 .VPFeatures .VPFeature:hover,
 .VPFeature:hover .box {
-  border-color: #c0bdb9 !important;
+  border-color: #d5d3d0 !important;
 }
 
 .dark .VPFeatures .VPFeature:hover,
