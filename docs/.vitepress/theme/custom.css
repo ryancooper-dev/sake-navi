@@ -166,16 +166,23 @@
 }
 
 .VPFeature {
-  background: var(--vp-c-bg-soft);
-  border: 1px solid var(--vp-c-border);
+  background: var(--vp-c-bg-alt);
+  border: 1px solid rgba(0, 0, 0, 0.1);
   border-radius: 8px;
   padding: 1.75rem;
   transition: all 0.2s ease;
 }
 
+.dark .VPFeature {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
 .VPFeature:hover {
-  border-color: var(--vp-c-text-3);
-  background: var(--vp-c-bg-alt);
+  border-color: rgba(0, 0, 0, 0.2);
+}
+
+.dark .VPFeature:hover {
+  border-color: rgba(255, 255, 255, 0.2);
 }
 
 .VPFeature .icon {
