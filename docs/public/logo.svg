@@ -1,42 +1,40 @@
 <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <!-- Minimalist sake cup (ochoko) -->
+  <!-- Tokkuri (徳利) - Sake bottle -->
+  <!-- Minimalist, single stroke weight, Japanese aesthetic -->
+
+  <!-- Bottle body -->
   <path
-    d="M8 10 L24 10 L22 26 Q16 28 10 26 L8 10 Z"
+    d="M13 8
+       C13 8 11 10 11 14
+       L10 24
+       C10 27 12 28 16 28
+       C20 28 22 27 22 24
+       L21 14
+       C21 10 19 8 19 8"
     fill="none"
     stroke="currentColor"
-    stroke-width="2"
+    stroke-width="1.75"
     stroke-linecap="round"
     stroke-linejoin="round"
   />
-  <!-- Sake level -->
+
+  <!-- Neck -->
   <path
-    d="M9.5 16 Q16 18 22.5 16 L22 22 Q16 24 10 22 L9.5 16 Z"
-    fill="currentColor"
-    opacity="0.15"
-  />
-  <!-- Steam wisps -->
-  <path
-    d="M12 6 Q13 4 12 2"
+    d="M13 8 L13 5 C13 4 14 3 16 3 C18 3 19 4 19 5 L19 8"
     fill="none"
     stroke="currentColor"
-    stroke-width="1.5"
+    stroke-width="1.75"
     stroke-linecap="round"
-    opacity="0.4"
+    stroke-linejoin="round"
   />
+
+  <!-- Sake level hint -->
   <path
-    d="M16 7 Q17 5 16 3"
+    d="M11.5 18 Q16 19.5 20.5 18"
     fill="none"
     stroke="currentColor"
-    stroke-width="1.5"
+    stroke-width="1"
     stroke-linecap="round"
-    opacity="0.4"
-  />
-  <path
-    d="M20 6 Q21 4 20 2"
-    fill="none"
-    stroke="currentColor"
-    stroke-width="1.5"
-    stroke-linecap="round"
-    opacity="0.4"
+    opacity="0.25"
   />
 </svg>
