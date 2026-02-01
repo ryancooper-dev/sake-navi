@@ -23,9 +23,9 @@
   --vp-c-bg-alt: #f5f5f4;
   --vp-c-bg-soft: #fafaf9;
 
-  /* Borders - barely there */
-  --vp-c-border: rgba(0, 0, 0, 0.06);
-  --vp-c-divider: rgba(0, 0, 0, 0.04);
+  /* Borders - subtle but visible */
+  --vp-c-border: rgba(0, 0, 0, 0.08);
+  --vp-c-divider: rgba(0, 0, 0, 0.06);
 
   /* Home hero gradient */
   --vp-home-hero-name-color: transparent;
@@ -166,15 +166,16 @@
 }
 
 .VPFeature {
-  background: transparent;
-  border: 1px solid var(--vp-c-divider);
+  background: var(--vp-c-bg-soft);
+  border: 1px solid var(--vp-c-border);
   border-radius: 8px;
   padding: 1.75rem;
-  transition: border-color 0.2s ease;
+  transition: all 0.2s ease;
 }
 
 .VPFeature:hover {
-  border-color: var(--vp-c-border);
+  border-color: var(--vp-c-text-3);
+  background: var(--vp-c-bg-alt);
 }
 
 .VPFeature .icon {
