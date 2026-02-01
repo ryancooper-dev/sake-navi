@@ -48,18 +48,22 @@ fn main() throws {
 
 ```nv
 use sake.{Engine, func_handler};
+use std.time;
 
 fn main() throws {
     let app = Engine.with_defaults();
 
     let logger = func_handler(|ctx| {
-        let method = ctx.request.method;
-        let path = ctx.request.path;
+        let method = ctx.method();
+        let path = ctx.path();
+        let start = time.now();
+
         println(`→ ${method} ${path}`);
 
         try ctx.next();
 
-        println(`← ${ctx.response.status_code}`);
+        let duration = (time.now() - start) * 1000.0;
+        println(`← ${method} ${path} completed in ${duration}ms`);
     });
 
     app.add_middleware(logger);
@@ -142,7 +146,7 @@ fn main() throws {
         let path = ctx.param("filepath") ?? "index.html";
         let full_path = `./public/${path}`;
 
-        if (let content = try? fs.read_file(full_path)) {
+        if (let content = try? fs.read_to_string(full_path)) {
             let mime = guess_mime(path);
             ctx.set_header("Content-Type", mime);
             ctx.data(mime, content);
